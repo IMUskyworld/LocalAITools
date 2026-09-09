@@ -1,0 +1,65 @@
+# Rust
+**/target/
+**/Cargo.lock
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Gradle
+.gradle/
+.cxx/
+build/
+local.properties
+*.iml
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+*.env
+
+# Claude 本地会话/配置（含历史命令，可能含敏感信息）
+.claude/
+.claude.local.json
+
+# 发布二进制产物（默认不提交，除根目录的两个发布文件）
+*.apk
+*.exe
+!LocalMindSetup.exe
+!LocalFile.apk
+LocalMindSetupBuild/
+LocalMindScripts/
+localmind/src-tauri/scripts/localmind-agent/
+localmind/scripts/build/
+localmind/scripts/dist/
+localmind/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tauri
+**/src-tauri/bin/
+
+# Android
+**/app/release/
+*.keystore
+*.jks
+
+# Logs
+*.log
+/logs/
+
+# Codex 配置与 skills（个人环境，不提交）
+.codex/
+
+# Python 缓存
+__pycache__/
+*.pyc

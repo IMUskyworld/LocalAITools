@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WhitelistActionRegistry",
+  "description": "白名单动作枚举与危险等级定义 — 三端共享契约",
+  "version": "v1",
+  "actions": [
+    { "type": "open_app", "name": "打开应用", "name_en": "Open application", "danger_level": "normal", "description": "启动已注册的应用程序" },
+    { "type": "open_file", "name": "打开文件", "name_en": "Open file", "danger_level": "normal", "description": "打开指定文件（只读方式）" },
+    { "type": "summarize_clipboard", "name": "总结剪贴板", "name_en": "Summarize clipboard", "danger_level": "normal", "description": "读取并总结剪贴板内容" },
+    { "type": "read_clipboard", "name": "读取剪贴板", "name_en": "Read clipboard", "danger_level": "normal", "description": "读取当前剪贴板文本" },
+    { "type": "system_volume", "name": "调节音量", "name_en": "Adjust volume", "danger_level": "normal", "description": "调节系统音量（0-100）" },
+    { "type": "system_brightness", "name": "调节亮度", "name_en": "Adjust brightness", "danger_level": "normal", "description": "调节屏幕亮度（0-100）" },
+    { "type": "lock_screen", "name": "锁屏", "name_en": "Lock screen", "danger_level": "normal", "description": "锁定电脑屏幕" },
+    { "type": "chat_task", "name": "执行对话任务", "name_en": "Execute chat task", "danger_level": "normal", "description": "执行 AI 对话相关的任务（已确认）" },
+    { "type": "file_write", "name": "写入文件", "name_en": "Write file", "danger_level": "dangerous", "description": "创建或覆写文件" },
+    { "type": "file_delete", "name": "删除文件", "name_en": "Delete file", "danger_level": "dangerous", "description": "删除指定文件或目录" },
+    { "type": "file_save", "name": "保存文件", "name_en": "Save file", "danger_level": "dangerous", "description": "保存文件到指定位置" },
+    { "type": "system_settings_change", "name": "更改系统设置", "name_en": "Change system settings", "danger_level": "dangerous", "description": "修改系统设置项" },
+    { "type": "app_install", "name": "安装应用", "name_en": "Install application", "danger_level": "dangerous", "description": "安装或卸载应用程序" }
+  ]
+}

@@ -1,0 +1,10 @@
+﻿package com.localmind.localfile.ui.auth
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+@Composable fun AuthScreen(onAuth:suspend(String,String,Boolean)->Unit){var register by remember{mutableStateOf(false)};var id by remember{mutableStateOf("")};var pw by remember{mutableStateOf("")};var confirm by remember{mutableStateOf("")};var error by remember{mutableStateOf("")};var busy by remember{mutableStateOf(false)};val scope=rememberCoroutineScope();Box(Modifier.fillMaxSize().padding(28.dp),contentAlignment=Alignment.Center){Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(16.dp)){Text("LocalFile",style=MaterialTheme.typography.headlineLarge);Text(if(register)"创建 LocalMind 账号" else "登录同一 LocalMind 账号",style=MaterialTheme.typography.titleLarge);Row{FilterChip(!register,{register=false},label={Text("登录")});Spacer(Modifier.width(8.dp));FilterChip(register,{register=true},label={Text("注册")})};OutlinedTextField(id,{id=it},Modifier.fillMaxWidth(),label={Text("邮箱或手机号")},singleLine=true);OutlinedTextField(pw,{pw=it},Modifier.fillMaxWidth(),label={Text("密码")},singleLine=true,visualTransformation=PasswordVisualTransformation());if(register)OutlinedTextField(confirm,{confirm=it},Modifier.fillMaxWidth(),label={Text("确认密码")},singleLine=true,visualTransformation=PasswordVisualTransformation());if(error.isNotEmpty())Text(error,color=MaterialTheme.colorScheme.error);Button(onClick={if(register&&pw!=confirm){error="两次密码不一致"}else scope.launch{busy=true;error="";try{onAuth(id,pw,register)}catch(e:Exception){error=e.message?:"登录失败"}finally{busy=false}}},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text(if(busy)"请稍候…" else if(register)"注册并登录" else "登录")};Text("使用同一账号登录电脑端后，即可关联两台设备。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}

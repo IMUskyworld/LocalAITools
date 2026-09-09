@@ -1,0 +1,7 @@
+# 构建产物：make_doc.exe（46MB）由 pack_doc_exe.py 生成，勿提交
+scripts/make_doc.exe
+scripts/dist/
+scripts/build/
+
+# Rust 构建产物
+target/

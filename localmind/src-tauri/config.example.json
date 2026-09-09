@@ -1,0 +1,23 @@
+{
+  "gateway": {
+    "wss_url": "wss://relay.example.com/ws",
+    "api_base": "http://localhost:3000",
+    "model_display_name": "Deepseek-V4-Pro",
+    "api_key": "LpNPOAwLlPydTUPU3aB8B2E253Cf43E49594Be283cCa4945"
+  },
+  "model": {
+    "default_windows": {
+      "name": "DeepSeek-R1-0528-Qwen3-8B Q4_K_M",
+      "size_mb": 5325,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "download_url": "https://cdn.example.com/models/DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf",
+      "license": "MIT",
+      "min_ram_mb": 8192
+    }
+  },
+  "app": {
+    "version": "0.2.0",
+    "theme": "system",
+    "language": "zh-CN"
+  }
+}

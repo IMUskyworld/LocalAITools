@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "shared-contract/envelope/v1/schema.json",
+  "title": "CommandEnvelope",
+  "description": "WSS 指令信封统一结构 v1 — 三端（LocalMind/LocalFile/RelayCloud）共享契约",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "v1",
+      "description": "信封版本号，当前仅 v1"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "信封唯一 ID（UUID v4）"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["command", "ack", "state", "pair", "pair_confirm", "heartbeat", "error"],
+      "description": "消息类型：command=指令, ack=确认, state=状态, pair=配对, heartbeat=心跳, error=错误"
+    },
+    "from_device_id": {
+      "type": "string",
+      "description": "来源设备 UUID"
+    },
+    "to_device_id": {
+      "type": "string",
+      "description": "目标设备 UUID（空=广播/中继）"
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "配对关系 ID（绑定校验用）；pair 类型时可为空"
+    },
+    "command_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "指令级幂等键，全链路去重"
+    },
+    "intent_text": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "指令原文（自然语言或结构化描述）；最大 500 字"
+    },
+    "action_type": {
+      "type": "string",
+      "description": "白名单动作类型（若已解析）；参考 whitelist 枚举"
+    },
+    "action_params": {
+      "type": "object",
+      "description": "动作参数（若已解析）；不同 action_type 结构不同"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["sent", "delivered", "running", "done", "failed"],
+      "description": "指令五态状态机"
+    },
+    "result_text": {
+      "type": "string",
+      "maxLength": 10000,
+      "description": "执行结果文本或失败原因"
+    },
+    "error_code": {
+      "type": "string",
+      "description": "错误码（state=failed 时必填）"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix 时间戳（毫秒）"
+    },
+    "pairing_code": {
+      "type": "string",
+      "maxLength": 6,
+      "minLength": 6,
+      "description": "配对码（type=pair 时使用），6 位数字"
+    },
+    "device_info": {
+      "type": "object",
+      "properties": {
+        "device_name": { "type": "string" },
+        "platform": { "type": "string", "enum": ["windows", "android"] },
+        "model": { "type": "string" },
+        "os_version": { "type": "string" }
+      },
+      "description": "设备信息（配对时提交）"
+    }
+  },
+  "required": ["version", "id", "type", "from_device_id", "timestamp"],
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "command" } } },
+      "then": { "required": ["command_id", "intent_text"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "state" } } },
+      "then": { "required": ["command_id", "state"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "pair" } } },
+      "then": { "required": ["pairing_code", "device_info"] }
+    }
+  ]
+}

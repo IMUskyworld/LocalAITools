@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "Default capability set for LocalMind",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default",
+    "fs:default",
+    "process:default",
+    "notification:default",
+    "global-shortcut:default"
+  ]
+}

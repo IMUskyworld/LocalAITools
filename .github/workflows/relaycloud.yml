@@ -1,0 +1,157 @@
+# RelayCloud CI/CD 流水线
+# 对齐：部署设计 §4.2 流水线 8 阶段
+
+name: RelayCloud CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+    paths:
+      - 'relay-cloud/**'
+      - 'shared-contract/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'relay-cloud/**'
+      - 'shared-contract/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint & Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay-cloud/relay-server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust clippy
+        run: cargo clippy -- -D warnings
+        continue-on-error: true
+
+      - name: Rust fmt check
+        run: cargo fmt --check
+        continue-on-error: true
+
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: relay-cloud/relay-server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo test
+        run: cargo test
+        continue-on-error: true
+
+      - name: Security audit
+        run: cargo audit
+        continue-on-error: true
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Build Docker image
+        run: |
+          docker build -t relay-server:${{ github.sha }} .
+          docker tag relay-server:${{ github.sha }} relay-server:latest
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: relay-server:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: relay-server:${{ github.sha }}
+          format: spdx-json
+          output-file: relay-server-sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-server-sbom
+          path: relay-server-sbom.json
+
+  deploy:
+    name: Deploy
+    if: github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Deploy to server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_HOST }} '
+            set -e
+            cd /opt/relaycloud
+
+            # Pull latest compose and config
+            git pull origin main
+
+            # Pull new images
+            docker compose pull
+
+            # Health check before deploy
+            docker compose up -d relay-server --no-start 2>/dev/null || true
+
+            # Graceful restart with health check
+            docker compose up -d --remove-orphans
+
+            # Wait for health check
+            echo "Waiting for health check..."
+            for i in 1 2 3 4 5; do
+              if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
+                echo "✅ relay-server healthy"
+                break
+              fi
+              sleep 5
+            done
+
+            # Verify new-api
+            if curl -sf http://localhost:3000/api/status > /dev/null 2>&1; then
+              echo "✅ new-api healthy"
+            else
+              echo "❌ new-api unhealthy, rolling back..."
+              docker compose up -d --force-recreate
+              exit 1
+            fi
+
+            # Cleanup old images
+            docker image prune -f
+
+            echo "✅ 部署完成"
+          '

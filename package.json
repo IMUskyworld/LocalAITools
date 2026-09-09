@@ -1,0 +1,18 @@
+{
+  "name": "localaitools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LocalMind × LocalFile 双端协同智能工具 — Monorepo",
+  "scripts": {
+    "dev:localmind": "cd localmind && pnpm tauri dev",
+    "build:localmind": "cd localmind && pnpm tauri build",
+    "lint:localmind": "cd localmind && pnpm lint",
+    "test:localmind": "cd localmind && pnpm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
+  }
+}
