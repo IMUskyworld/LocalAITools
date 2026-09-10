@@ -33,6 +33,22 @@ LocalMind / LocalFile 的跨网络语义中继服务。目标是让用户不需�
 | `DELETE` | `/v1/pairings/{tenant_id}` | 解除配对 |
 | `GET` | `/ws` | WebSocket 升级；需要 `X-Device-Id` 和 `Authorization: Bearer <token>` |
 
+## 规划中的账号层
+
+当前服务端实现的是设备注册、设备 token、一次性配对码和 WSS 转发。游客模式继续使用这条路径即可。
+
+账号模式的设计见 `开发计划/ADR-003-account-and-guest-mode.md`。后续将在不破坏现有设备 API 的前提下增加：
+
+- `/v1/auth/register`
+- `/v1/auth/login`
+- `/v1/auth/refresh`
+- `/v1/auth/logout`
+- `/v1/auth/me`
+- `/v1/account/devices`
+- 账号级设备授权和撤销接口
+
+账号只解决“用户是谁”和“设备属于谁”；同一账号下的手机不能自动控制电脑，必须由 Windows 本机确认建立控制配对。
+
 ## 本地运行
 
 ```bash

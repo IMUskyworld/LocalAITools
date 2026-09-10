@@ -22,6 +22,7 @@
 - **四类文档生成**：PPT / Word / Excel / PDF（内置生成器，无需安装 Office / Python）
 - **精美 GUI**：桌面端 Fluent 风（Tauri Web），手机端 Material 3（Jetpack Compose）
 - **跨网络 Relay**：Android / Windows 只建立出站 WSS，经自建语义中继实现配对、幂等转发和离线队列，不要求用户安装 Tailscale
+- **游客 / 账号双模式（规划中）**：游客无需账号即可本地使用；登录同一账号后用于设备登记和发现，手机控制电脑仍需目标设备本机确认
 
 ---
 
@@ -147,6 +148,7 @@ docker compose -f relay-server/docker-compose.yml up -d --build
 
 - [当前开发路线图](开发计划/开发路线图.md) — 当前唯一权威开发基线，固定阶段顺序、职责边界、安全红线和验收标准。
 - [Relay-first ADR](开发计划/ADR-002-relay-first.md) — 同类项目调研、传输方案决策与安全边界。
+- [账号与游客模式 ADR](开发计划/ADR-003-account-and-guest-mode.md) — 游客/账号双模式、设备授权、认证与远程控制边界。
 - [历史架构设计](开发计划/) — 早期行业调研、高层架构、系统设计和用户故事；其中旧 RelayCloud、云端网关方案仅供历史参考。
 
 ---
