@@ -15,6 +15,7 @@ fi
 
 install -d -m 0755 "${REPO_DIR}/relay-server/certs"
 install -m 0644 "${REPO_DIR}/relay-server/deploy/Caddyfile" "${CADDYFILE}"
+sed -i "s/39\.107\.53\.230/${PUBLIC_IP}/g" "${CADDYFILE}"
 
 cd "${REPO_DIR}"
 docker compose -f "${COMPOSE_FILE}" up -d --build
