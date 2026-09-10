@@ -1,3 +1,9 @@
+{
+	# IP-only TLS clients commonly omit SNI. Without this Caddy may reject the
+	# handshake even though the certificate contains the public IP SAN.
+	default_sni 39.107.53.230
+}
+
 # Development/demo deployment for a server that does not yet have an ICP-filed
 # domain. Clients pin the Caddy internal CA certificate distributed with the repo.
 https://39.107.53.230 {
