@@ -9,7 +9,8 @@ ENV CARGO_TERM_COLOR=always \
 
 COPY shared-contract ./shared-contract
 COPY relay-server ./relay-server
-RUN cargo build --manifest-path relay-server/Cargo.toml --release
+RUN printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n' > /usr/local/cargo/config.toml \
+    && cargo build --manifest-path relay-server/Cargo.toml --release
 
 FROM debian:bookworm-slim AS runtime
 
