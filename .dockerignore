@@ -1,0 +1,7 @@
+**
+!Cargo.toml
+!Cargo.lock
+!shared-contract/
+!shared-contract/**
+!relay-server/
+!relay-server/**
