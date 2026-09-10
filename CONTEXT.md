@@ -20,12 +20,13 @@
 | make_doc | 文档生成器 exe（PPT/Word/Excel/PDF），agent 的 create_doc 底层调用 |
 | AgentServer | `localmind/scripts/agent_server.py`，SSE HTTP 服务，Rust 懒启动 |
 
-## 当前状态（2026-09-10 快照）
+## 当前状态（2026-09-11 快照）
 
-- **开发基线**：`开发计划/开发路线图.md`；Phase 0、Phase 1 已完成并验收通过；Phase 2 已进入 Relay MVP 实施。
+- **开发基线**：`开发计划/开发路线图.md`；Phase 0、Phase 1 已完成并验收通过；Phase 2 Relay 服务端已部署并验证，下一步接入 Windows/Android 客户端。
 - **Harness v2 已默认为生产路径**：结构化工具错误、单 Turn 重复调用拦截、请求/工具预算、单工具超时、输出截断、Turn 级 Trace。baseline 仅供 A/B 复现。
 - **Phase 1 评测**：同一模型 `deepseek-chat` 两轮 12 任务 A/B，baseline 18/24，Harness v2 24/24；详细结果见 `开发计划/Phase1-Harness评测报告.md`。
 - **Relay MVP 已完成服务端第一版**：`relay-server/` 提供设备注册、一次性配对码、WSS 转发、命令白名单、`command_id` 幂等、离线队列和状态回传；Rust 单元 + 双端 WSS 集成测试通过。
+- **Relay 已上线（2026-09-11）**：https://39.107.53.230/health 已通过本机与公网 HTTPS 验证；Caddy internal CA 固定信任文件为 `relay-server/certs/localmind-relay-ca.crt`。当前无域名/ICP，属校级演示部署。
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
