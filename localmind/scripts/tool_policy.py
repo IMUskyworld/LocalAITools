@@ -94,10 +94,12 @@ class ToolPolicy:
         candidate = Path(raw)
         try:
             resolved = candidate.resolve(strict=must_exist)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"路径不存在: {candidate}") from exc
         except (OSError, RuntimeError) as exc:
             raise ToolPolicyError(f"路径无效: {path}") from exc
         if must_exist and not resolved.exists():
-            raise ToolPolicyError(f"路径不存在: {resolved}")
+            raise FileNotFoundError(f"路径不存在: {resolved}")
         return resolved
 
     @staticmethod

@@ -63,3 +63,6 @@ Thumbs.db
 # Python 缓存
 __pycache__/
 *.pyc
+
+# Phase 1 raw eval reports
+localmind/scripts/eval_reports/

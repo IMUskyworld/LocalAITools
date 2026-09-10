@@ -94,3 +94,8 @@ def test_registry_rejects_unregistered_tool():
     with pytest.raises(KeyError):
         registry.register("run_command", lambda: None)
     assert "run_command" not in TOOL_SPECS
+
+def test_missing_file_is_file_not_found_not_policy_denied(tmp_path: Path):
+    policy = policy_for(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        policy.validate_read(tmp_path / "missing.txt")

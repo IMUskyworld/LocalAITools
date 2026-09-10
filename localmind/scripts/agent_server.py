@@ -8,6 +8,7 @@
       {"type":"thinking","step":{id,phase,label,status,detail,timestamp}}
       {"type":"tool","log":{name,args,output,success}}
       {"type":"delta","text":"..."}
+      {"type":"trace","trace":{...}}
       {"type":"done","content":"..."}
       {"type":"error","message":"..."}
 
@@ -15,9 +16,11 @@
 """
 import asyncio
 import functools
+import hashlib
 import json
 import os
 import subprocess
+import threading
 import shutil
 import sys
 import tempfile
@@ -25,7 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool, UsageLimits
 from pydantic_ai.messages import (
     FinalResultEvent,
     FunctionToolCallEvent,
@@ -43,8 +46,9 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from harness_trace import TraceRecorder
 from tool_policy import ToolPolicy, ToolPolicyError
-from tool_registry import ToolRegistry
+from tool_registry import TOOL_SPECS, ToolRegistry
 
 AGENT_TOKEN = os.environ.get("LOCALMIND_AGENT_TOKEN", "dev-token")
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
@@ -72,9 +76,9 @@ def resolve_desktop_path() -> str:
 
 # ========== 系统提示词（从原 TS buildSystemPrompt 平移，注入桌面路径） ==========
 
-def build_system_prompt(desktop_path: str) -> str:
+def build_system_prompt(desktop_path: str, variant: str = "baseline") -> str:
     desktop = desktop_path or "C:/Users/Public/Desktop"
-    return f"""你是 LocalMind，一个运行在 Windows 电脑上的 AI 助手。
+    base = f"""你是 LocalMind，一个运行在 Windows 电脑上的 AI 助手。
 你能直接操作电脑。可用工具：write_file（写文件）、read_file（读文件）、list_dir（列目录）、move_file（移动/整理文件）、open_app（打开应用）、read_clipboard（读剪贴板）、create_doc（生成 PPT/Word/Excel/PDF 文档）。
 当用户要求创建文件、写文件、生成文档时，必须调用对应工具实际执行，绝不能只在回复里口头说"已创建"或"已完成"——只有工具执行返回成功才算真的完成。
 如果用户只是聊天，直接回答即可。所有回答请使用中文。
@@ -95,14 +99,23 @@ def build_system_prompt(desktop_path: str) -> str:
 - 用户要求"打开 XX 应用 / 打开文件 / 打开文件夹"时，调用 open_app（参数填应用名或完整路径）。
 - 用户要求"浏览/查看文件夹里有什么"时，调用 list_dir。
 
-【关于 create_doc 的重要说明】
-1. create_doc 工具能正常生成 PPT/Word/Excel/PDF，不需要任何额外安装（文档生成器已内置）。
-2. 只要用户要求生成文档（ppt/word/excel/pdf/演示文稿/文档/表格），你必须调用 create_doc 工具，并把完整内容写进 spec。
-3. 严禁编造"工具不可用""生成失败""需要安装依赖"等理由，也不要用 write_file 写脚本代替 create_doc——直接用 create_doc 生成最终文档文件。
-4. 如果 create_doc 工具调用确实返回了错误，把工具返回的真实错误信息告诉用户，而不是自行编造。"""
+【关于 create_doc 的强制规则】
+1. 生成 PPT/Word/Excel/PDF 时必须调用 create_doc，不允许只输出 Markdown 或口头说明。
+2. 严禁编造"工具不可用""生成失败""需要安装依赖"等理由，也不要用 write_file 写脚本代替 create_doc——直接用 create_doc 生成最终文档文件。
+3. 如果 create_doc 工具调用确实返回了错误，把工具返回的真实错误信息告诉用户，而不是自行编造。"""
+    if variant != "v2":
+        return base
+    return base + f"""
 
+【Harness v2 执行协议】
+1. 先判断任务类型：纯问答直接回答；需要操作文件或系统时必须调用工具，不要虚构执行结果。
+2. 调用工具前先确认参数完整，优先使用绝对路径。路径必须位于当前允许目录内，不能访问系统目录、Program Files、UNC 或 device namespace。
+3. 每个工具只执行一次相同调用。若第一次成功，直接使用结果；若失败，读取结构化错误并改变策略，不要原样重试。
+4. 工具返回 ok=false 时，先解释真实原因，再尝试一个替代方案。策略拒绝（POLICY_DENIED）不得绕过。
+5. 达到任务目标后立即停止，不要继续调用无必要工具。最多允许 8 次模型请求和 12 次工具调用。
+6. 最终回答只描述真实发生的结果：文件已生成、内容已读取或任务被拒绝，必须有对应工具结果支撑。
+7. 默认桌面路径仍然是 {desktop}/；本轮评测或测试若给出新的工作目录，以请求参数为准。"""
 
-# ========== 工具（纯 Python 实现，不依赖 Rust IPC） ==========
 
 def normalize_path_separators(value):
     """递归把 spec JSON 中所有字符串的反斜杠替换为正斜杠（对齐 tools.rs）。"""
@@ -189,8 +202,42 @@ def build_create_doc(policy: ToolPolicy) -> object:
     return create_doc
 
 
-def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
-    """构建 Registry 声明的工具。emit_thinking 用于表达失败与反思事件。"""
+def build_tools(
+    emit_thinking,
+    policy: ToolPolicy,
+    trace: TraceRecorder | None = None,
+    variant: str = "baseline",
+) -> ToolRegistry:
+    """构建 Registry 声明的工具。v2 增加重复调用检测、结构化错误和输出截断。"""
+    v2 = variant == "v2"
+    seen_calls: set[str] = set()
+    seen_calls_lock = threading.Lock()
+    cached_results: dict[str, str] = {}
+
+    def _fingerprint(name: str, kwargs: dict) -> str:
+        raw = name + "|" + json.dumps(kwargs, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+    def _structured_error(code: str, message: str, *, retryable: bool = False) -> str:
+        return json.dumps(
+            {"ok": False, "error": {"code": code, "message": message[:1000], "retryable": retryable}},
+            ensure_ascii=False,
+        )
+
+    def _output_limit(name: str) -> int:
+        spec = TOOL_SPECS.get(name)
+        return spec.max_output_chars if spec else 12_000
+
+    def _is_declared_failure(name: str, output: str) -> bool:
+        if name == "create_doc":
+            return output.startswith(("不支持的", "未找到", "生成失败", "生成文档失败"))
+        if name == "move_file":
+            return output.startswith(("源文件不存在", "移动失败"))
+        if name == "read_clipboard":
+            return output.startswith("读取剪贴板失败")
+        if name == "open_app":
+            return output.startswith("打开失败")
+        return False
 
     def write_file(path: str, content: str) -> str:
         """创建新文件或覆盖写一个文本文件。目录不存在会自动创建。用于生成代码、脚本、文档、配置文件、笔记等。path 为文件的完整路径，content 为要写入的完整文件内容。"""
@@ -216,7 +263,6 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
         try:
             import ctypes
             from ctypes import wintypes
-
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
             user32.OpenClipboard.argtypes = [wintypes.HWND]
@@ -229,7 +275,6 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
             kernel32.GlobalLock.restype = wintypes.LPVOID
             kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
             kernel32.GlobalUnlock.restype = wintypes.BOOL
-
             CF_UNICODETEXT = 13
             if user32.OpenClipboard(None):
                 try:
@@ -248,17 +293,12 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
                     user32.CloseClipboard()
         except Exception:
             pass
-
         try:
             ps_cmd = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
                       "$OutputEncoding=[System.Text.Encoding]::UTF8;Get-Clipboard -Raw")
-            out = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=8, encoding="utf-8", errors="replace",
-            )
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=8, encoding="utf-8", errors="replace")
             if out.returncode == 0 and out.stdout and out.stdout.strip():
-                text = out.stdout.rstrip("\r\n")
-                return f"【剪贴板内容】\n\n{text}"
+                return f"【剪贴板内容】\n\n{out.stdout.rstrip(chr(13) + chr(10))}"
             return "剪贴板为空或无文本内容"
         except Exception as e:
             return f"读取剪贴板失败: {e}"
@@ -272,11 +312,7 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
         try:
             for child in sorted(p.iterdir()):
                 try:
-                    if child.is_dir():
-                        items.append(f"[目录] {child.name}/")
-                    else:
-                        size = child.stat().st_size
-                        items.append(f"[文件] {child.name} ({size} 字节)")
+                    items.append(f"[目录] {child.name}/" if child.is_dir() else f"[文件] {child.name} ({child.stat().st_size} 字节)")
                 except Exception:
                     items.append(f"[?] {child.name}")
         except PermissionError as e:
@@ -299,29 +335,72 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
             return f"打开失败: {e}"
 
     def move_file(src: str, dst: str) -> str:
-        """移动/重命名文件或目录。整理文件时使用：dst 可以是目标路径，也可以是目标目录（自动保留文件名）。"""
-        s, d = policy.validate_move(src, dst)
-        if not s.exists():
+        """移动/重命名文件或目录。整理文件时使用：dst 可以是目标路径，也可以为目标目录（自动保留文件名）。"""
+        s_path, d_path = policy.validate_move(src, dst)
+        if not s_path.exists():
             return f"源文件不存在: {src}"
-        if d.is_dir():
-            d = policy.validate_write(d / s.name)
+        if d_path.is_dir():
+            d_path = policy.validate_write(d_path / s_path.name)
         try:
-            d.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(s), str(d))
-            return f"已移动: {s} -> {d}"
+            d_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(s_path), str(d_path))
+            return f"已移动: {s_path} -> {d_path}"
         except Exception as e:
             return f"移动失败: {e}"
 
     def _wrap(name, fn):
         @functools.wraps(fn)
         def wrapped(**kwargs):
+            fingerprint = _fingerprint(name, kwargs)
+            duplicate = False
+            cached_output: str | None = None
+            if v2:
+                with seen_calls_lock:
+                    if fingerprint in seen_calls:
+                        duplicate = True
+                        spec = TOOL_SPECS.get(name)
+                        if spec and spec.cacheable:
+                            cached_output = cached_results.get(fingerprint)
+                    else:
+                        seen_calls.add(fingerprint)
+            if duplicate:
+                if cached_output is not None:
+                    return cached_output
+                if trace:
+                    trace.record("duplicate_tool_call", tool=name, args_hash=fingerprint)
+                emit_thinking("reflecting", f"{name} 重复调用已被拦截，请改用新参数或基于已有结果继续", "error")
+                return _structured_error("DUPLICATE_TOOL_CALL", f"同一 Turn 内已执行过完全相同的 {name} 调用，禁止重复执行")
+            if trace:
+                trace.record("tool_call_started", tool=name, args_hash=fingerprint)
             try:
-                return fn(**kwargs)
+                output = str(fn(**kwargs) or "")
+                if v2 and _is_declared_failure(name, output):
+                    if trace:
+                        trace.record("tool_call_finished", tool=name, success=False, error_code="TOOL_EXECUTION_FAILED")
+                    return _structured_error("TOOL_EXECUTION_FAILED", output, retryable=True)
+                limit = _output_limit(name)
+                if len(output) > limit:
+                    output = output[:limit] + f"\n…[工具输出已截断，原始长度 {len(output)} 字符]"
+                if v2 and TOOL_SPECS.get(name) and TOOL_SPECS[name].cacheable:
+                    cached_results[fingerprint] = output
+                if trace:
+                    trace.record("tool_call_finished", tool=name, success=True, output_chars=len(output))
+                return output
             except Exception as e:
+                if trace:
+                    trace.record("retry_started", tool=name, error=str(e)[:300])
+                    trace.record("tool_call_finished", tool=name, success=False, error=str(e)[:300])
                 emit_thinking("reflecting", f"{name} 执行失败，正在分析原因...", "running")
                 emit_thinking("retrying", f"失败原因：{e}", "running")
-                raise
-
+                if not v2:
+                    raise
+                if isinstance(e, ToolPolicyError):
+                    return _structured_error("POLICY_DENIED", str(e), retryable=False)
+                if isinstance(e, TimeoutError):
+                    return _structured_error("TOOL_TIMEOUT", str(e), retryable=True)
+                if isinstance(e, FileNotFoundError):
+                    return _structured_error("FILE_NOT_FOUND", str(e), retryable=True)
+                return _structured_error("TOOL_ERROR", str(e), retryable=True)
         return wrapped
 
     registry = ToolRegistry()
@@ -333,6 +412,7 @@ def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
     registry.register("open_app", _wrap("open_app", open_app))
     registry.register("move_file", _wrap("move_file", move_file))
     return registry
+
 
 # ========== 文本工具调用兜底（小模型通病） ==========
 
@@ -542,6 +622,12 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     def _fallback_success(self, name, output):
         """文本兜底执行时判断工具返回是否成功（工具返回错误字符串而非抛异常的情况）。"""
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict) and parsed.get("ok") is False:
+                return False
+        except Exception:
+            pass
         if name == "read_file":
             return not output.startswith("文件不存在")
         if name == "create_doc":
@@ -568,47 +654,88 @@ class AgentHandler(BaseHTTPRequestHandler):
         })
 
     async def _run_agent(self, body):
-        mode = body.get("mode", "online")
-        # 前端传的 desktop_path 可能为空，用 agent 自解析的真实桌面兜底
-        desktop = body.get("desktop_path") or resolve_desktop_path()
-
-        # 模型：online=DeepSeek，offline=Ollama（都走 OpenAI 兼容协议）
-        if mode == "offline":
-            model_name = body.get("model") or "qwen2.5:7b"
-            model = OllamaModel(
-                model_name,
-                provider=OllamaProvider(base_url=OLLAMA_BASE, api_key="not-needed"),
-            )
-        else:
-            # 生产路径：Rust 启动时通过环境变量 LOCALMIND_DEEPSEEK_KEY 注入 key，避免 key 进 HTTP 请求体。
-            # 请求体 token 仅作独立测试（直接 python agent_server.py 跑）的回退。
-            token = os.environ.get("LOCALMIND_DEEPSEEK_KEY") or body.get("token", "")
-            model = OpenAIChatModel(
-                "deepseek-chat",
-                provider=OpenAIProvider(base_url=DEEPSEEK_BASE, api_key=token),
-            )
-
-        selected_attachment_paths = body.get("selected_attachment_paths") or []
-        policy = ToolPolicy(selected_attachment_paths=selected_attachment_paths)
-        tools = build_tools(self._emit_thinking, policy)
-        prompt, history = split_messages(body.get("messages", []))
-        agent = Agent(
-            model,
-            system_prompt=build_system_prompt(desktop),
-            tools=tools.callables(),
-            retries=1,  # 工具失败自动重试 1 次（Pydantic AI 内建）
-        )
-
-        self._emit_thinking("planning", "正在分析任务...", "running")
+        variant = str(body.get("harness_variant") or os.environ.get("LOCALMIND_HARNESS_VARIANT", "v2")).lower()
+        if variant not in {"baseline", "v2"}:
+            variant = "v2"
+        v2 = variant == "v2"
+        turn_id = str(body.get("turn_id") or f"anonymous-{int(time.time() * 1000)}")
+        trace = TraceRecorder(turn_id, variant, emit=self._write_event)
+        tool_logs: list[dict] = []
+        trace.record("turn_started", mode=body.get("mode", "online"), message_count=len(body.get("messages", []) or []))
 
         try:
+            mode = body.get("mode", "online")
+            desktop = body.get("desktop_path") or resolve_desktop_path()
+
+            if mode == "offline":
+                model_name = body.get("model") or "qwen2.5:7b"
+                model = OllamaModel(
+                    model_name,
+                    provider=OllamaProvider(base_url=OLLAMA_BASE, api_key="not-needed"),
+                )
+            else:
+                model_name = body.get("model") or "deepseek-chat"
+                token = os.environ.get("LOCALMIND_DEEPSEEK_KEY") or body.get("token", "")
+                model = OpenAIChatModel(
+                    model_name,
+                    provider=OpenAIProvider(base_url=DEEPSEEK_BASE, api_key=token),
+                )
+
+            selected_attachment_paths = body.get("selected_attachment_paths") or []
+            allowed_roots = body.get("allowed_roots") if os.environ.get("LOCALMIND_EVAL_MODE") == "1" else None
+            policy = ToolPolicy(
+                allowed_roots=allowed_roots,
+                selected_attachment_paths=selected_attachment_paths,
+            )
+            tools = build_tools(self._emit_thinking, policy, trace=trace, variant=variant)
+            prompt, history = split_messages(body.get("messages", []))
+            system_prompt = build_system_prompt(desktop, variant)
+            trace.record(
+                "context_built",
+                model=model_name,
+                mode=mode,
+                prompt_chars=len(prompt),
+                history_messages=len(history),
+                system_prompt_chars=len(system_prompt),
+                tools=list(tools.names()),
+            )
+
+            if v2:
+                agent_tools = [
+                    Tool(
+                        tools.get(spec.name),
+                        name=spec.name,
+                        timeout=max(1.0, spec.timeout_ms / 1000),
+                    )
+                    for spec in tools.specs()
+                ]
+            else:
+                agent_tools = tools.callables()
+
+            agent = Agent(
+                model,
+                system_prompt=system_prompt,
+                tools=agent_tools,
+                retries=1,
+                tool_timeout=120 if v2 else None,
+            )
+
+            self._emit_thinking("planning", "正在分析任务...", "running")
+            trace.record("model_request_started", model=model_name)
+
             content_parts = []
-            tool_calls = {}  # tool_call_id → {name, args}
-            async with agent.run_stream_events(prompt, message_history=history) as events:
+            tool_calls = {}
+            usage_limits = UsageLimits(request_limit=8, tool_calls_limit=12) if v2 else None
+            async with agent.run_stream_events(
+                prompt,
+                message_history=history,
+                usage_limits=usage_limits,
+            ) as events:
                 async for event in events:
                     if isinstance(event, PartDeltaEvent):
                         d = event.delta
                         if isinstance(d, TextPartDelta) and d.content_delta:
+                            trace.first_token()
                             content_parts.append(d.content_delta)
                             self._write_event({"type": "delta", "text": d.content_delta})
                     elif isinstance(event, FunctionToolCallEvent):
@@ -623,26 +750,31 @@ class AgentHandler(BaseHTTPRequestHandler):
                         tool_name = getattr(part, "tool_name", "")
                         call = tool_calls.get(getattr(part, "tool_call_id", ""), {})
                         outcome = getattr(part, "outcome", "success")
-                        success = outcome != "failed"
                         output = getattr(part, "content", "")
                         if isinstance(output, (list, tuple)):
                             output = " ".join(str(x) for x in output)
                         output = str(output or "")
-                        self._write_event({
-                            "type": "tool",
-                            "log": {
-                                "name": call.get("name", tool_name),
-                                "args": call.get("args", "{}"),
-                                "output": output[:4000],
-                                "success": success,
-                            },
-                        })
+                        success = outcome != "failed" and self._fallback_success(tool_name, output)
+                        log = {
+                            "name": call.get("name", tool_name),
+                            "args": call.get("args", "{}"),
+                            "output": output[:4000],
+                            "success": success,
+                        }
+                        tool_logs.append(log)
+                        self._write_event({"type": "tool", "log": log})
                         if success:
                             self._emit_thinking("executing", f"{tool_name} 完成", "success")
                         else:
                             self._emit_thinking("executing", f"{tool_name} 失败", "error")
                     elif isinstance(event, FinalResultEvent):
-                        pass  # 不作为结束标记（以流结束为准）
+                        pass
+
+            usage = None
+            try:
+                usage = events.usage
+            except Exception:
+                pass
 
             result = getattr(events, "result", None)
             content = ""
@@ -654,21 +786,22 @@ class AgentHandler(BaseHTTPRequestHandler):
             if not content:
                 content = "".join(content_parts)
 
-            # 文本工具调用兜底：结构化 tool_calls 未发生，但模型在文本里输出了工具调用 JSON。
-            # 小模型（如 qwen 7b）通病，对齐原 TS parseToolCallsFromText 的兜底行为。
             if not tool_calls:
                 fallback = parse_tool_call_from_text(content)
                 if fallback and tools.contains(fallback["name"]):
                     name, args = fallback["name"], fallback["args"]
                     self._emit_thinking("executing", f"正在执行：{name}（本地模型文本指令）", "running")
                     try:
-                        output = tools.get(name)(**args)
-                        output = str(output or "")
+                        output = str(tools.get(name)(**args) or "")
                         success = self._fallback_success(name, output)
-                        self._write_event({
-                            "type": "tool",
-                            "log": {"name": name, "args": json.dumps(args, ensure_ascii=False), "output": output[:4000], "success": success},
-                        })
+                        log = {
+                            "name": name,
+                            "args": json.dumps(args, ensure_ascii=False),
+                            "output": output[:4000],
+                            "success": success,
+                        }
+                        tool_logs.append(log)
+                        self._write_event({"type": "tool", "log": log})
                         if success:
                             self._emit_thinking("executing", f"{name} 完成", "success")
                             content = f"（本地模型未走标准工具调用，已按其文本指令执行 {name}）\n\n{output}"
@@ -683,13 +816,16 @@ class AgentHandler(BaseHTTPRequestHandler):
                         })
                         content = f"（尝试执行本地模型文本指令失败：{e}）"
 
-            # 清理最终内容里残留的工具调用文本
             content = strip_tool_call_text(content)
+            trace.finish("completed", content=content, usage=usage, tool_logs=tool_logs)
             self._write_event({"type": "done", "content": content})
+
         except (BrokenPipeError, ConnectionResetError, OSError):
-            raise  # 交给上层静默处理
+            trace.finish("cancelled", error="client disconnected", tool_logs=tool_logs)
+            raise
         except Exception as e:
             try:
+                trace.finish("failed", error=str(e), tool_logs=tool_logs)
                 self._write_event({"type": "error", "message": str(e)})
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
