@@ -24,7 +24,9 @@ pub struct AppState {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let storage = Arc::new(tokio::sync::RwLock::new(storage::StorageManager::new()));
+    let storage = Arc::new(tokio::sync::RwLock::new(
+        storage::StorageManager::new().expect("初始化本地数据库失败")
+    ));
     let chat_engine = Arc::new(tokio::sync::RwLock::new(chat::ChatEngine::new(storage.clone())));
     let model_manager = Arc::new(tokio::sync::RwLock::new(model::ModelManager::new(storage.clone())));
     let agent_manager = Arc::new(agent_process::AgentManager::new());
@@ -40,19 +42,15 @@ async fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
-            chat::get_sessions,
             chat_api::list_sessions,
             chat_api::create_chat_session,
             chat_api::delete_chat_session,
             chat_api::rename_chat_session,
             chat_api::list_messages,
-            chat_api::append_message,
-            chat::create_session,
-            chat::delete_session,
-            chat::rename_session,
-            chat::send_message,
+            chat_api::turn_begin,
+            chat_api::turn_complete,
+            chat_api::turn_fail,
             chat::stop_generation,
-            chat::get_messages,
             chat::switch_mode,
             chat::get_mode,
             model::get_models,
@@ -69,18 +67,9 @@ async fn main() {
             storage::save_config,
             storage::get_app_info,
             files::read_text_file,
-            tools::write_file,
-            tools::append_file,
-            tools::read_file,
-            tools::list_dir,
-            tools::delete_path,
-            tools::rename_path,
-            tools::run_command,
             tools::open_app,
             tools::get_common_paths,
             tools::check_ollama,
-            tools::ollama_chat,
-            tools::create_doc,
             agent_process::get_agent_config,
         ])
         .build(tauri::generate_context!())

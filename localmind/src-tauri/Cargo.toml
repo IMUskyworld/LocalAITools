@@ -39,6 +39,10 @@ llama-cpp-2 = "0.1.152"
 llama-cpp-sys-2 = "0.1.152"
 
 parking_lot = "0.12"
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 
 arboard = "3"
 futures-executor = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

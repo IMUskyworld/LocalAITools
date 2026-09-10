@@ -1,7 +1,7 @@
 # LocalAITools — 项目记忆
 
 > 记录当前状态、领域语言与关键决策。**改架构 / 接新功能 / 打包发布前先读本文件**。
-> 详细架构、接口契约、验收标准见 `开发计划/README.md`（自包含开发文档）。
+> 详细路线图、接口契约、验收标准和施工边界见 `开发计划/开发路线图.md`（当前唯一权威基线）；`开发计划/README.md` 等旧文档仅作历史参考。
 
 ## 项目是什么
 
@@ -20,8 +20,9 @@
 | make_doc | 文档生成器 exe（PPT/Word/Excel/PDF），agent 的 create_doc 底层调用 |
 | AgentServer | `localmind/scripts/agent_server.py`，SSE HTTP 服务，Rust 懒启动 |
 
-## 当前状态（2026-08 快照）
+## 当前状态（2026-09-10 快照）
 
+- **开发基线**：`开发计划/开发路线图.md`；Phase 0 已完成并验收通过；Phase 1 尚未实施。
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
@@ -30,9 +31,9 @@
 ## 关键决策（ADR 摘要）
 
 1. **API key 经环境变量注入 + 构建期烘焙**：优先级 = 运行时环境变量 `LOCALMIND_DEEPSEEK_KEY` > 编译期 `option_env!("LOCALMIND_DEEPSEEK_KEY")`（构建时注入，使打包出的 exe 开箱即用）。源码/仓库不存明文 key。⚠️ 烘焙后 key 可从安装包提取，适用于低额度/备用 key，勿用主账号高额度 key。
-2. **云端方案已移除**——远程控制/RelayCloud 不再开发；状态栏勿再展示"远程设备"等占位信息。
+2. **云端 RelayCloud 方案已移除**：当前不建设云端中继和 new-api 网关；双端远程控制仍是产品目标，但必须走 Tailscale/局域网受控通道，且先完成 Phase 0-1；状态栏不得展示未实现的“远程设备”占位信息。
 3. **Agent 工具在 Python 侧实现**（agent_server.py），不依赖 Rust IPC——新增工具 = 改 Python + 重新打包 localmind-agent。
-4. **安全红线**：删除/执行命令类工具（delete_path、run_command）须配二次确认才能暴露给 agent；当前 7 个工具均为低风险操作。
+4. **安全红线**：`run_command`、任意 Shell/executable 和远程任意命令永久禁止暴露给 Agent；`delete_path` 在完成 Permission Gateway、备份、审计和 Undo 前不得开放。
 
 ## 打包要点（踩过的坑，环境不可自明）
 

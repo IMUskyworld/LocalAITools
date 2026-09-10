@@ -43,6 +43,9 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from tool_policy import ToolPolicy, ToolPolicyError
+from tool_registry import ToolRegistry
+
 AGENT_TOKEN = os.environ.get("LOCALMIND_AGENT_TOKEN", "dev-token")
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 DEEPSEEK_BASE = "https://api.deepseek.com/v1"
@@ -141,7 +144,7 @@ def find_doc_exe() -> str:
     return ""
 
 
-def build_create_doc() -> object:
+def build_create_doc(policy: ToolPolicy) -> object:
     def create_doc(doc_type: str, spec: dict) -> str:
         """生成文档文件（PPT/Word/Excel/PDF）。用户要求制作演示文稿、文档、表格、PDF 时使用。
         doc_type 取值：ppt=演示文稿, docx=Word文档, xlsx=Excel表格, pdf=PDF。
@@ -152,6 +155,7 @@ def build_create_doc() -> object:
         }
         if doc_type not in valid:
             return f"不支持的文档类型: {doc_type}（支持 ppt/docx/xlsx/pdf）"
+        policy.validate_create_doc(spec)
         exe = find_doc_exe()
         if not exe:
             return "未找到 make_doc.exe，无法生成文档。请确认它与 LocalMind.exe 在同一目录（或 scripts/ 子目录）。"
@@ -185,33 +189,30 @@ def build_create_doc() -> object:
     return create_doc
 
 
-def build_tools(emit_thinking):
-    """构建三个工具。emit_thinking 用于在工具失败时发射反思/重试事件。"""
+def build_tools(emit_thinking, policy: ToolPolicy) -> ToolRegistry:
+    """构建 Registry 声明的工具。emit_thinking 用于表达失败与反思事件。"""
 
     def write_file(path: str, content: str) -> str:
         """创建新文件或覆盖写一个文本文件。目录不存在会自动创建。用于生成代码、脚本、文档、配置文件、笔记等。path 为文件的完整路径，content 为要写入的完整文件内容。"""
-        p = Path(path)
+        p = policy.validate_write(path)
         if p.parent and str(p.parent) != ".":
             p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        return f"已写入文件: {path}\n大小: {len(content)} 字节"
+        return f"已写入文件: {p}\n大小: {len(content)} 字节"
 
     def read_file(path: str) -> str:
         """读取文本文件内容。用于查看代码、配置、日志、笔记等文件内容。path 为文件的完整路径。"""
-        p = Path(path)
-        if not p.exists():
-            return f"文件不存在: {path}"
+        p = policy.validate_read(path)
         data = p.read_bytes()
         size = len(data)
         text = data.decode("utf-8", errors="replace")
         MAX = 6000
         if len(text) > MAX:
             text = text[:MAX] + f"\n…[输出已截断，剩余 {len(text) - MAX} 字符]"
-        return f"【文件: {path} | 大小: {size} 字节】\n\n{text}"
+        return f"【文件: {p} | 大小: {size} 字节】\n\n{text}"
 
     def read_clipboard() -> str:
         """读取 Windows 剪贴板文本内容（直接读 UTF-16，避免 PowerShell 管道编码乱码）。"""
-        # 优先：Windows API 读 CF_UNICODETEXT（UTF-16），不经过任何 shell 管道
         try:
             import ctypes
             from ctypes import wintypes
@@ -246,9 +247,8 @@ def build_tools(emit_thinking):
                 finally:
                     user32.CloseClipboard()
         except Exception:
-            pass  # API 失败则回退 PowerShell
+            pass
 
-        # 回退：PowerShell 强制 UTF-8 输出（老式方案，保留兼容）
         try:
             ps_cmd = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
                       "$OutputEncoding=[System.Text.Encoding]::UTF8;Get-Clipboard -Raw")
@@ -265,7 +265,7 @@ def build_tools(emit_thinking):
 
     def list_dir(path: str) -> str:
         """列出目录内容（子目录与文件，附大小）。用于浏览文件夹、整理桌面前的查看。path 为目录完整路径。"""
-        p = Path(path)
+        p = policy.validate_read(path)
         if not p.is_dir():
             return f"不是有效目录: {path}"
         items = []
@@ -284,31 +284,31 @@ def build_tools(emit_thinking):
         MAX_ITEMS = 100
         if len(items) > MAX_ITEMS:
             items = items[:MAX_ITEMS] + [f"…（共 {len(items)} 项，仅显示前 {MAX_ITEMS} 项）"]
-        return f"【目录: {path} | 共 {len(items)} 项】\n" + "\n".join(items)
+        return f"【目录: {p} | 共 {len(items)} 项】\n" + "\n".join(items)
 
     def open_app(target: str) -> str:
-        """打开应用、文件或目录（用系统默认方式启动）。target 可以是应用名、完整路径或 URL。"""
+        """打开白名单应用、受控目录/文件或 http(s) URL。target 不接受任意 shell 命令。"""
+        kind, value = policy.validate_open_target(target)
         try:
-            if target.lower().startswith(("http://", "https://")):
-                os.startfile(target)
+            if kind == "app":
+                subprocess.Popen([value], creationflags=subprocess.CREATE_NO_WINDOW)
             else:
-                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
-            return f"已启动: {target}"
+                os.startfile(value)
+            return f"已启动: {value}"
         except Exception as e:
             return f"打开失败: {e}"
 
     def move_file(src: str, dst: str) -> str:
         """移动/重命名文件或目录。整理文件时使用：dst 可以是目标路径，也可以是目标目录（自动保留文件名）。"""
-        s = Path(src)
+        s, d = policy.validate_move(src, dst)
         if not s.exists():
             return f"源文件不存在: {src}"
-        d = Path(dst)
         if d.is_dir():
-            d = d / s.name
+            d = policy.validate_write(d / s.name)
         try:
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(s), str(d))
-            return f"已移动: {src} -> {d}"
+            return f"已移动: {s} -> {d}"
         except Exception as e:
             return f"移动失败: {e}"
 
@@ -324,16 +324,15 @@ def build_tools(emit_thinking):
 
         return wrapped
 
-    return {
-        "write_file": _wrap("write_file", write_file),
-        "read_file": _wrap("read_file", read_file),
-        "create_doc": _wrap("create_doc", build_create_doc()),
-        "read_clipboard": _wrap("read_clipboard", read_clipboard),
-        "list_dir": _wrap("list_dir", list_dir),
-        "open_app": _wrap("open_app", open_app),
-        "move_file": _wrap("move_file", move_file),
-    }
-
+    registry = ToolRegistry()
+    registry.register("write_file", _wrap("write_file", write_file))
+    registry.register("read_file", _wrap("read_file", read_file))
+    registry.register("create_doc", _wrap("create_doc", build_create_doc(policy)))
+    registry.register("read_clipboard", _wrap("read_clipboard", read_clipboard))
+    registry.register("list_dir", _wrap("list_dir", list_dir))
+    registry.register("open_app", _wrap("open_app", open_app))
+    registry.register("move_file", _wrap("move_file", move_file))
+    return registry
 
 # ========== 文本工具调用兜底（小模型通病） ==========
 
@@ -589,20 +588,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                 provider=OpenAIProvider(base_url=DEEPSEEK_BASE, api_key=token),
             )
 
+        selected_attachment_paths = body.get("selected_attachment_paths") or []
+        policy = ToolPolicy(selected_attachment_paths=selected_attachment_paths)
+        tools = build_tools(self._emit_thinking, policy)
         prompt, history = split_messages(body.get("messages", []))
-        tools = build_tools(self._emit_thinking)
         agent = Agent(
             model,
             system_prompt=build_system_prompt(desktop),
-            tools=[
-                tools["write_file"],
-                tools["read_file"],
-                tools["read_clipboard"],
-                tools["list_dir"],
-                tools["open_app"],
-                tools["move_file"],
-                tools["create_doc"],
-            ],
+            tools=tools.callables(),
             retries=1,  # 工具失败自动重试 1 次（Pydantic AI 内建）
         )
 
@@ -665,11 +658,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             # 小模型（如 qwen 7b）通病，对齐原 TS parseToolCallsFromText 的兜底行为。
             if not tool_calls:
                 fallback = parse_tool_call_from_text(content)
-                if fallback and fallback["name"] in tools:
+                if fallback and tools.contains(fallback["name"]):
                     name, args = fallback["name"], fallback["args"]
                     self._emit_thinking("executing", f"正在执行：{name}（本地模型文本指令）", "running")
                     try:
-                        output = tools[name](**args)
+                        output = tools.get(name)(**args)
                         output = str(output or "")
                         success = self._fallback_success(name, output)
                         self._write_event({

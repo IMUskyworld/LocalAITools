@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { ChatSession, ChatMessage, ChatMode, ThinkingStep } from '@/types/chat';
-import { generateId } from '@/utils/helpers';
 import { tauriInvoke } from '@/api/ipc';
 import { checkOllama, type OllamaModel } from '@/api/ollama';
 import type { SelectedAttachment } from '@/api/files';
@@ -16,16 +15,17 @@ export interface ChatStoreState {
   modelName: string;
   latencyMs: number;
   tokensPerSecond: number;
-  // Ollama 离线推理相关
   ollamaRunning: boolean;
   ollamaModels: OllamaModel[];
   selectedOllamaModel: string;
-  // 文件附件相关
   attachments: SelectedAttachment[];
-  // 工具调用记录（当前会话）
   toolCalls: ToolLog[];
-  // Agent 思考轨迹（规划/执行/反思）
   thinkingSteps: ThinkingStep[];
+}
+
+export interface TurnStartResult {
+  turnId: string;
+  userMessage: ChatMessage;
 }
 
 export interface ChatStoreActions {
@@ -33,7 +33,6 @@ export interface ChatStoreActions {
   switchSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, content: string) => Promise<void>;
   stopGeneration: () => Promise<void>;
   switchMode: (mode: ChatMode) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
@@ -46,17 +45,20 @@ export interface ChatStoreActions {
   setTokensPerSecond: (tps: number) => void;
   getCurrentSession: () => ChatSession | undefined;
   getCurrentMessages: () => ChatMessage[];
-  persistUserMessage: (sessionId: string, content: string) => Promise<ChatMessage>;
-  persistAssistantMessage: (sessionId: string, content: string) => Promise<ChatMessage>;
-  // Ollama 离线推理相关
+  beginTurn: (sessionId: string, content: string, modelLabel?: string) => Promise<TurnStartResult>;
+  completeTurn: (turnId: string, content: string, modelLabel?: string) => Promise<ChatMessage>;
+  failTurn: (
+    turnId: string,
+    status: 'failed' | 'cancelled' | 'interrupted',
+    errorCode?: string,
+    errorMessage?: string,
+  ) => Promise<void>;
   refreshOllama: () => Promise<OllamaModel[]>;
   setSelectedOllamaModel: (model: string) => void;
   getSelectedOllamaModel: () => string;
-  // 文件附件
   addAttachment: (attach: SelectedAttachment) => void;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
-  // 工具调用
   addToolCall: (log: ToolLog) => void;
   clearToolCalls: () => void;
   addThinkingStep: (step: ThinkingStep) => void;
@@ -65,7 +67,26 @@ export interface ChatStoreActions {
 
 type ChatStore = ChatStoreState & ChatStoreActions;
 
-const DEFAULT_TITLE = 'New Chat';
+function messageFromDto(data: any): ChatMessage {
+  return {
+    id: data.id,
+    sessionId: data.session_id,
+    role: data.role,
+    content: data.content,
+    timestamp: data.created_at,
+    modelName: data.model_label,
+  };
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string') return error;
+  return '操作失败';
+}
+
+function modelLabel(mode: ChatMode, selectedModel: string): string {
+  return mode === 'online' ? 'Deepseek-V4-Pro' : (selectedModel || '本地模型');
+}
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
@@ -86,30 +107,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   createSession: async (title?: string) => {
     try {
-      const r: any = await tauriInvoke('create_chat_session', { title: title || '' });
-      if (r?.data) {
-        const session: ChatSession = {
-          id: r.data.id,
-          title: r.data.title,
-          createdAt: r.data.created_at,
-          updatedAt: r.data.updated_at,
-        };
-        set((s) => ({
-          sessions: [...s.sessions, session],
-          currentSessionId: session.id,
-          messages: { ...s.messages, [session.id]: [] },
-          toolCalls: [],
-          thinkingSteps: [],
-        }));
-        return session.id;
-      }
-    } catch (e) {
-      console.warn('create_chat_session failed, falling back to local:', e);
+      const r = await tauriInvoke<any>('create_chat_session', { title: title || '' });
+      if (!r.data) throw new Error('创建会话失败：后端没有返回会话数据');
+      const session: ChatSession = {
+        id: r.data.id,
+        title: r.data.title,
+        createdAt: r.data.created_at,
+        updatedAt: r.data.updated_at,
+      };
+      set((s) => ({
+        sessions: [...s.sessions, session],
+        currentSessionId: session.id,
+        messages: { ...s.messages, [session.id]: [] },
+        toolCalls: [],
+        thinkingSteps: [],
+        error: null,
+      }));
+      return session.id;
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
     }
-    const id = generateId();
-    const session: ChatSession = { id, title: title || DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now() };
-    set((s) => ({ sessions: [...s.sessions, session], currentSessionId: id, messages: { ...s.messages, [id]: [] }, toolCalls: [], thinkingSteps: [] }));
-    return id;
   },
 
   switchSession: async (sessionId: string) => {
@@ -120,117 +138,98 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   renameSession: async (sessionId: string, title: string) => {
     try {
       await tauriInvoke('rename_chat_session', { sessionId, title });
-    } catch (e) { console.warn('rename_chat_session failed:', e); }
-    set((s) => ({
-      sessions: s.sessions.map((s2) =>
-        s2.id === sessionId ? { ...s2, title, updatedAt: Date.now() } : s2
-      ),
-    }));
+      set((s) => ({
+        sessions: s.sessions.map((item) =>
+          item.id === sessionId ? { ...item, title, updatedAt: Date.now() } : item
+        ),
+        error: null,
+      }));
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
   },
 
   deleteSession: async (sessionId: string) => {
     try {
       await tauriInvoke('delete_chat_session', { sessionId });
-    } catch (e) { console.warn('delete_chat_session failed:', e); }
-    set((s) => {
-      const ns = s.sessions.filter((s2) => s2.id !== sessionId);
-      const nm = { ...s.messages }; delete nm[sessionId];
-      return {
-        sessions: ns,
-        messages: nm,
-        currentSessionId:
-          s.currentSessionId === sessionId ? (ns[ns.length - 1]?.id ?? null) : s.currentSessionId,
-      };
-    });
-  },
-
-  sendMessage: async (sessionId: string, content: string) => {
-    try {
-      const r: any = await tauriInvoke('send_message', {
-        sessionId: sessionId,
-        content,
-      });
-      if (r?.data) {
-        const aiMsg: ChatMessage = {
-          id: r.data.id,
-          sessionId: r.data.session_id,
-          role: r.data.role,
-          content: r.data.content,
-          timestamp: r.data.created_at,
+      set((s) => {
+        const sessions = s.sessions.filter((item) => item.id !== sessionId);
+        const messages = { ...s.messages };
+        delete messages[sessionId];
+        return {
+          sessions,
+          messages,
+          currentSessionId:
+            s.currentSessionId === sessionId ? (sessions[sessions.length - 1]?.id ?? null) : s.currentSessionId,
+          error: null,
         };
-        set((s) => ({
-          messages: { ...s.messages, [sessionId]: [...(s.messages[sessionId] || []), aiMsg] },
-        }));
-      }
-    } catch (e) {
-      console.warn('send_message failed:', e);
+      });
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
     }
   },
 
   stopGeneration: async () => {
-    try { await tauriInvoke('stop_generation'); } catch (e) { console.warn('stop_generation failed:', e); }
-    set({ isStreaming: false });
+    try {
+      await tauriInvoke('stop_generation');
+      set({ isStreaming: false, error: null });
+    } catch (error) {
+      set({ isStreaming: false, error: errorText(error) });
+      throw error;
+    }
   },
 
   switchMode: async (mode: ChatMode) => {
     try {
-      const r: any = await tauriInvoke('switch_mode', { mode });
-      if (r?.data) {
-        set({
-          mode: r.data.mode,
-          modelName: r.data.current_model_label || (mode === 'online' ? 'Deepseek-V4-Pro' : 'Local Model'),
-          error: null,
-        });
-        return;
-      }
-    } catch (e: any) {
-      set({ error: e?.toString() || 'Switch failed' });
+      const r = await tauriInvoke<any>('switch_mode', { mode });
+      if (!r.data) throw new Error('切换模式失败：后端没有返回模式数据');
+      set({
+        mode: r.data.mode,
+        modelName: r.data.current_model_label || (mode === 'online' ? 'Deepseek-V4-Pro' : '本地模型'),
+        error: null,
+      });
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
     }
-    set({ mode, modelName: mode === 'online' ? 'Deepseek-V4-Pro' : 'Local Model' });
   },
 
   loadSessions: async () => {
     try {
-      const r: any = await tauriInvoke('list_sessions');
-      if (r?.data) {
-        const sessions: ChatSession[] = r.data.map((s: any) => ({
-          id: s.id,
-          title: s.title,
-          createdAt: s.created_at,
-          updatedAt: s.updated_at,
-        }));
-        set({ sessions });
-      }
-    } catch (e) { console.warn('list_sessions failed:', e); }
+      const r = await tauriInvoke<any[]>('list_sessions');
+      const sessions: ChatSession[] = (r.data || []).map((item) => ({
+        id: item.id,
+        title: item.title,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      }));
+      set({ sessions, error: null });
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
   },
 
   loadMessages: async (sessionId: string) => {
     try {
-      const r: any = await tauriInvoke('list_messages', { sessionId });
-      if (r?.data) {
-        const msgs: ChatMessage[] = r.data.map((m: any) => ({
-          id: m.id,
-          sessionId: m.session_id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.created_at,
-          modelName: m.model_label,
-        }));
-        set((s) => ({ messages: { ...s.messages, [sessionId]: msgs } }));
-      }
-    } catch (e) { console.warn('list_messages failed:', e); }
+      const r = await tauriInvoke<any[]>('list_messages', { sessionId });
+      const messages: ChatMessage[] = (r.data || []).map(messageFromDto);
+      set((s) => ({ messages: { ...s.messages, [sessionId]: messages }, error: null }));
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
   },
 
   addMessage: (sessionId: string, message: ChatMessage) => {
     set((state) => {
       const sessionMessages = state.messages[sessionId] || [];
       return {
-        messages: {
-          ...state.messages,
-          [sessionId]: [...sessionMessages, message],
-        },
-        sessions: state.sessions.map((s) =>
-          s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
+        messages: { ...state.messages, [sessionId]: [...sessionMessages, message] },
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? { ...session, updatedAt: Date.now() } : session
         ),
       };
     });
@@ -242,33 +241,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return {
         messages: {
           ...state.messages,
-          [sessionId]: sessionMessages.map((m) =>
-            m.id === messageId ? { ...m, ...updates } : m
+          [sessionId]: sessionMessages.map((message) =>
+            message.id === messageId ? { ...message, ...updates } : message
           ),
         },
       };
     });
   },
 
-  setIsStreaming: (streaming: boolean) => {
-    set({ isStreaming: streaming });
-  },
-
-  setError: (error: string | null) => {
-    set({ error });
-  },
-
-  setLatency: (ms: number) => {
-    set({ latencyMs: ms });
-  },
-
-  setTokensPerSecond: (tps: number) => {
-    set({ tokensPerSecond: tps });
-  },
+  setIsStreaming: (streaming: boolean) => set({ isStreaming: streaming }),
+  setError: (error: string | null) => set({ error }),
+  setLatency: (ms: number) => set({ latencyMs: ms }),
+  setTokensPerSecond: (tps: number) => set({ tokensPerSecond: tps }),
 
   getCurrentSession: () => {
     const state = get();
-    return state.sessions.find((s) => s.id === state.currentSessionId);
+    return state.sessions.find((session) => session.id === state.currentSessionId);
   },
 
   getCurrentMessages: () => {
@@ -277,121 +265,75 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     return state.messages[state.currentSessionId] || [];
   },
 
-  persistUserMessage: async (sessionId: string, content: string): Promise<ChatMessage> => {
-    const modelLabel = get().mode === 'online' ? 'Deepseek-V4-Pro' : 'Local Model';
+  beginTurn: async (sessionId: string, content: string, label?: string) => {
     try {
-      const r: any = await tauriInvoke('append_message', {
+      const r = await tauriInvoke<any>('turn_begin', {
         sessionId,
-        role: 'user',
         content,
-        modelLabel,
+        modelLabel: label || modelLabel(get().mode, get().selectedOllamaModel),
       });
-      if (r?.data) {
-        return {
-          id: r.data.id,
-          sessionId: r.data.session_id,
-          role: r.data.role,
-          content: r.data.content,
-          timestamp: r.data.created_at,
-          modelName: r.data.model_label,
-        };
-      }
-    } catch (e) { console.warn('append_message (user) failed:', e); }
-    return {
-      id: generateId(),
-      sessionId,
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-    };
+      if (!r.data) throw new Error('创建 Turn 失败：后端没有返回 Turn 数据');
+      return {
+        turnId: r.data.turn_id,
+        userMessage: messageFromDto(r.data.user_message),
+      };
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
   },
 
-  persistAssistantMessage: async (sessionId: string, content: string): Promise<ChatMessage> => {
-    const modelLabel = get().mode === 'online' ? 'Deepseek-V4-Pro' : 'Local Model';
+  completeTurn: async (turnId: string, content: string, label?: string) => {
     try {
-      const r: any = await tauriInvoke('append_message', {
-        sessionId,
-        role: 'assistant',
+      const r = await tauriInvoke<any>('turn_complete', {
+        turnId,
         content,
-        modelLabel,
+        modelLabel: label || modelLabel(get().mode, get().selectedOllamaModel),
       });
-      if (r?.data) {
-        return {
-          id: r.data.id,
-          sessionId: r.data.session_id,
-          role: r.data.role,
-          content: r.data.content,
-          timestamp: r.data.created_at,
-          modelName: r.data.model_label,
-        };
-      }
-    } catch (e) { console.warn('append_message (assistant) failed:', e); }
-    return {
-      id: generateId(),
-      sessionId,
-      role: 'assistant',
-      content,
-      timestamp: Date.now(),
-    };
+      if (!r.data) throw new Error('完成 Turn 失败：后端没有返回消息数据');
+      return messageFromDto(r.data);
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
   },
 
-  // ===== Ollama 离线推理 =====
+  failTurn: async (turnId, status, errorCode, errorMessage) => {
+    try {
+      await tauriInvoke('turn_fail', {
+        turnId,
+        status,
+        errorCode: errorCode || 'AGENT_ERROR',
+        errorMessage: errorMessage || '',
+      });
+    } catch (error) {
+      set({ error: errorText(error) });
+      throw error;
+    }
+  },
 
   refreshOllama: async () => {
     const status = await checkOllama();
     const models = status.models;
     set((s) => {
-      // 保持当前选中模型有效；若无效或为空则选第一个
       let selected = s.selectedOllamaModel;
-      if (models.length > 0 && !models.some((m) => m.name === selected)) {
+      if (models.length > 0 && !models.some((model) => model.name === selected)) {
         selected = models[0].name;
       }
-      return {
-        ollamaRunning: status.running,
-        ollamaModels: models,
-        selectedOllamaModel: selected,
-      };
+      return { ollamaRunning: status.running, ollamaModels: models, selectedOllamaModel: selected };
     });
     return models;
   },
 
-  setSelectedOllamaModel: (model: string) => {
-    set({ selectedOllamaModel: model, modelName: model });
-  },
-
+  setSelectedOllamaModel: (model: string) => set({ selectedOllamaModel: model, modelName: model }),
   getSelectedOllamaModel: () => get().selectedOllamaModel,
 
-  // ===== 文件附件 =====
+  addAttachment: (attach: SelectedAttachment) => set((s) => ({ attachments: [...s.attachments, attach] })),
+  removeAttachment: (id: string) => set((s) => ({ attachments: s.attachments.filter((item) => item.id !== id) })),
+  clearAttachments: () => set({ attachments: [] }),
 
-  addAttachment: (attach: SelectedAttachment) => {
-    set((s) => ({ attachments: [...s.attachments, attach] }));
-  },
-
-  removeAttachment: (id: string) => {
-    set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) }));
-  },
-
-  clearAttachments: () => {
-    set({ attachments: [] });
-  },
-
-  // ===== 工具调用 =====
-
-  addToolCall: (log: ToolLog) => {
-    set((s) => ({ toolCalls: [...s.toolCalls, log] }));
-  },
-
-  clearToolCalls: () => {
-    set({ toolCalls: [] });
-  },
-
-  // ===== 思考轨迹 =====
-
-  addThinkingStep: (step: ThinkingStep) => {
-    set((s) => ({ thinkingSteps: [...s.thinkingSteps, step] }));
-  },
-
-  clearThinkingSteps: () => {
-    set({ thinkingSteps: [] });
-  },
+  addToolCall: (log: ToolLog) => set((s) => ({ toolCalls: [...s.toolCalls, log] })),
+  clearToolCalls: () => set({ toolCalls: [] }),
+  addThinkingStep: (step: ThinkingStep) => set((s) => ({ thinkingSteps: [...s.thinkingSteps, step] })),
+  clearThinkingSteps: () => set({ thinkingSteps: [] }),
 }));

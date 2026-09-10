@@ -23,11 +23,14 @@ Write-Host "LOCALMIND_DEEPSEEK_KEY 已注入（长度 $($env:LOCALMIND_DEEPSEEK_
 
 # ---- 路径（基于脚本位置）----
 $ProjectRoot = Join-Path $PSScriptRoot "localmind"
-$ReleaseDir  = Join-Path $ProjectRoot "src-tauri\target\release"
+$CrateDir    = Join-Path $ProjectRoot "src-tauri"
+$ReleaseDir  = Join-Path $CrateDir "target\release"
 $OutputExe   = Join-Path $PSScriptRoot "LocalMind.exe"
 $ScriptsDir  = Join-Path $PSScriptRoot "LocalMindScripts"
 
 Write-Host "=== Step 2: Build production executable through Tauri CLI ==="
+$env:CARGO_TARGET_DIR = Join-Path $CrateDir "target"
+Write-Host "CARGO_TARGET_DIR: $env:CARGO_TARGET_DIR"
 Set-Location $ProjectRoot
 # Important: raw `cargo build --release` embeds build.devUrl and makes the EXE
 # navigate to localhost:1420. Tauri CLI sets the production build environment.
@@ -35,8 +38,12 @@ npx tauri build --no-bundle
 if ($LASTEXITCODE -ne 0) { throw "Tauri production build failed" }
 
 Write-Host "=== Step 3: Publish executable ==="
-$BuiltExe = Join-Path $ReleaseDir "LocalMind.exe"
-if (-not (Test-Path -LiteralPath $BuiltExe)) { throw "EXE not found: $BuiltExe" }
+$BuiltExe = Join-Path $ReleaseDir "localmind.exe"
+if (-not (Test-Path -LiteralPath $BuiltExe)) {
+    $LegacyName = Join-Path $ReleaseDir "LocalMind.exe"
+    if (Test-Path -LiteralPath $LegacyName) { $BuiltExe = $LegacyName }
+}
+if (-not (Test-Path -LiteralPath $BuiltExe)) { throw "EXE not found under $ReleaseDir (expected localmind.exe or LocalMind.exe)" }
 Copy-Item -LiteralPath $BuiltExe -Destination $OutputExe -Force
 $size = (Get-Item -LiteralPath $OutputExe).Length / 1MB
 Write-Host "exe size: $([math]::Round($size, 1)) MB"

@@ -160,51 +160,6 @@ export function streamOllamaChat(
   return controller;
 }
 
-// ========== Ollama 工具调用（走 Rust IPC 代理，避免 WebView2 访问 localhost 限制） ==========
-
-/**
- * 走 Rust 端 ollama_chat IPC 做工具调用（非流式）
- * Rust 用 reqwest 转发到 Ollama 原生 /api/chat，对 qwen 的 function calling 支持好
- */
-export async function chatOnceWithToolsNative(
-  model: string,
-  messages: any[],
-  tools: any[]
-): Promise<{ content: string; tool_calls?: any[] }> {
-  const result: any = await tauriInvoke('ollama_chat', {
-    model,
-    messages,
-    tools: tools || [],
-  });
-
-  const data = result?.data;
-  if (!data) {
-    throw new Error(result?.error || 'Ollama 请求失败');
-  }
-  if (!data.success) {
-    throw new Error(data.error || 'Ollama 调用失败');
-  }
-
-  const content = data.content || '';
-  const rawCalls = data.tool_calls;
-
-  // Ollama 原生 tool_calls 结构 → OpenAI 兼容格式
-  const toolCalls: any[] | undefined = Array.isArray(rawCalls)
-    ? rawCalls.map((tc: any, i: number) => ({
-        id: tc.id || `call_${i}`,
-        type: 'function',
-        function: {
-          name: tc.function?.name || '',
-          arguments: typeof tc.function?.arguments === 'string'
-            ? tc.function.arguments
-            : JSON.stringify(tc.function?.arguments || {}),
-        },
-      }))
-    : undefined;
-
-  return { content, tool_calls: toolCalls };
-}
-
 /**
  * 获取一个可展示的模型大小（MB/GB）
  */

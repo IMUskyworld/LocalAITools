@@ -1,32 +1,82 @@
-// IPC 桥接层 — 懒加载 @tauri-apps/api/core 的 invoke
-// 防止模块加载时直接依赖 Tauri API 导致崩溃
+// IPC 桥接层 — 对 Tauri invoke 做显式错误封装。
+// 任何命令失败都不能再静默返回 null；调用方必须处理 IpcError。
 
-let invokeFn: any = null;
+export interface AppResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string | null;
+  error_code?: string | null;
+}
+
+export class IpcError extends Error {
+  readonly command: string;
+  readonly code: string;
+  readonly cause?: unknown;
+
+  constructor(command: string, code: string, message: string, cause?: unknown) {
+    super(message);
+    this.name = 'IpcError';
+    this.command = command;
+    this.code = code;
+    this.cause = cause;
+  }
+}
+
+let invokeFn: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 let initAttempted = false;
 
-async function getInvoke(): Promise<any> {
+async function getInvoke() {
   if (!initAttempted) {
     initAttempted = true;
     try {
       const mod = await import('@tauri-apps/api/core');
       invokeFn = mod.invoke;
     } catch (e) {
-      console.warn('[IPC] @tauri-apps/api/core not available, using fallback:', e);
+      console.error('[IPC] @tauri-apps/api/core 不可用:', e);
     }
   }
   return invokeFn;
 }
 
-export async function tauriInvoke(cmd: string, args?: Record<string, unknown>): Promise<any> {
+function errorCodeFromPayload(payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'error_code' in payload) {
+    const code = (payload as { error_code?: unknown }).error_code;
+    if (typeof code === 'string' && code) return code;
+  }
+  return 'IPC_COMMAND_FAILED';
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === 'string' && error) return error;
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message) return message;
+  }
+  return 'IPC 调用失败';
+}
+
+export async function tauriInvoke<T = any>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<AppResponse<T>> {
   const fn = await getInvoke();
   if (!fn) {
-    console.warn(`[IPC] invoke('${cmd}') skipped — not in Tauri context`);
-    return null;
+    throw new IpcError(cmd, 'IPC_UNAVAILABLE', `无法调用 ${cmd}：当前不在 Tauri 运行环境中`);
   }
+
   try {
-    return await fn(cmd, args);
-  } catch (e) {
-    console.warn(`[IPC] invoke('${cmd}') failed:`, e);
-    return null;
+    const result = await fn(cmd, args) as AppResponse<T>;
+    if (result && typeof result === 'object' && result.success === false) {
+      throw new IpcError(
+        cmd,
+        errorCodeFromPayload(result),
+        result.error || `命令 ${cmd} 执行失败`,
+      );
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof IpcError) throw error;
+    throw new IpcError(cmd, 'IPC_COMMAND_FAILED', `${cmd} 调用失败: ${errorMessage(error)}`, error);
   }
 }

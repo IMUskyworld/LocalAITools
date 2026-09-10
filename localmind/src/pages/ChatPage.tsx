@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useStreamChat } from '@/hooks/useStreamChat';
 import MessageBubble from '@/components/MessageBubble';
@@ -113,7 +113,7 @@ export default function ChatPage() {
 
   // Load sessions from backend on mount
   useEffect(() => {
-    loadSessions();
+    loadSessions().catch(() => {});
   }, [loadSessions]);
 
   // Auto-scroll on new messages
@@ -124,7 +124,7 @@ export default function ChatPage() {
   // Create initial session if none exists after loading
   useEffect(() => {
     if (sessions.length === 0) {
-      createSession();
+      createSession().catch(() => {});
     }
   }, [sessions.length, createSession]);
 
@@ -140,7 +140,7 @@ export default function ChatPage() {
     // Rename session if first message
     const session = sessions.find((s) => s.id === currentSessionId);
     if (session && session.title === '新对话') {
-      renameSession(currentSessionId, truncate(text, 30));
+      renameSession(currentSessionId, truncate(text, 30)).catch(() => {});
     }
 
     setInputText('');
@@ -185,7 +185,7 @@ export default function ChatPage() {
           <h3>对话列表</h3>
           <button
             className="new-chat-btn"
-            onClick={() => createSession()}
+            onClick={() => { createSession().catch(() => {}); }}
             title="新建对话"
             aria-label="新建对话"
           >
@@ -213,7 +213,7 @@ export default function ChatPage() {
             <div
               key={session.id}
               className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
-              onClick={() => switchSession(session.id)}
+              onClick={() => { switchSession(session.id).catch(() => {}); }}
             >
               <div className="session-item-title">{session.title}</div>
               <div className="session-item-meta">
@@ -222,7 +222,7 @@ export default function ChatPage() {
                   className="session-delete-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteSession(session.id);
+                    deleteSession(session.id).catch(() => {});
                   }}
                   title="删除对话"
                 >

@@ -24,6 +24,7 @@ export interface AgentRunOptions {
   mode: 'online' | 'offline';
   model: string;              // 离线时的模型名
   messages: AgentMessage[];   // 已含附件注入的完整对话
+  selectedAttachmentPaths?: string[]; // 本轮文件选择器明确选择的只读路径
   signal?: AbortSignal;       // 停止生成
   onToolCall?: (log: ToolLog) => void;
   onThinking?: (step: ThinkingStep) => void;  // 思考过程回调（规划/执行/反思）
@@ -79,6 +80,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         model: opts.model,
         desktop_path: desktopPath,
         messages: opts.messages,
+        selected_attachment_paths: opts.selectedAttachmentPaths || [],
       }),
       signal: controller.signal,
     });

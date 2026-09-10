@@ -19,7 +19,7 @@ if (Test-Path -LiteralPath $StageDir) { Remove-Item -LiteralPath $StageDir -Recu
 New-Item -ItemType Directory -Path (Join-Path $StageDir "scripts") -Force | Out-Null
 Copy-Item -LiteralPath $Standalone -Destination (Join-Path $StageDir "LocalMind.exe") -Force
 Copy-Item -LiteralPath (Join-Path $ScriptsDir "make_doc.exe") -Destination (Join-Path $StageDir "scripts\make_doc.exe") -Force
-Copy-Item -LiteralPath (Join-Path $ScriptsDir "localmind-agent") -Destination (Join-Path $StageDir "localmind-agent") -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $ScriptsDir "localmind-agent") -Destination (Join-Path $StageDir "scripts\localmind-agent") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "src-tauri\icons\icon.ico") -Destination (Join-Path $StageDir "icon.ico") -Force
 Write-Host "Staged LocalMind.exe + scripts/make_doc.exe + localmind-agent + icon.ico"
 
