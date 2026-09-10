@@ -3,3 +3,7 @@ resolver = "2"
 members = [
     "localmind/src-tauri",
 ]
+exclude = [
+    "relay-server",
+    "shared-contract",
+]

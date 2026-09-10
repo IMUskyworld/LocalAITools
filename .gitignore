@@ -66,3 +66,6 @@ __pycache__/
 
 # Phase 1 raw eval reports
 localmind/scripts/eval_reports/
+
+# Relay local data
+relay-server/data/

@@ -1,0 +1,15 @@
+# Development/demo deployment for a server that does not yet have an ICP-filed
+# domain. Clients pin the Caddy internal CA certificate distributed with the repo.
+https://39.107.53.230 {
+	tls internal
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+	log {
+		output file /var/log/caddy/localmind-relay-access.log
+		format json
+	}
+}
+
+http://39.107.53.230 {
+	redir https://39.107.53.230{uri} permanent
+}

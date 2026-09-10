@@ -21,6 +21,7 @@
 - **在线 / 离线双模**：在线用 DeepSeek 云端大模型；离线用 Ollama 本地推理，断网可用
 - **四类文档生成**：PPT / Word / Excel / PDF（内置生成器，无需安装 Office / Python）
 - **精美 GUI**：桌面端 Fluent 风（Tauri Web），手机端 Material 3（Jetpack Compose）
+- **跨网络 Relay**：Android / Windows 只建立出站 WSS，经自建语义中继实现配对、幂等转发和离线队列，不要求用户安装 Tailscale
 
 ---
 
@@ -30,6 +31,7 @@
 | --- | --- | --- | --- |
 | **LocalMind** | Windows | Tauri 2 + React + Rust + Python (Pydantic AI) | 桌面 AI 助手：在线/离线双模对话、Agent 工具循环（写文件/读剪贴板/打开应用/生成文档） |
 | **LocalFile** | Android | Kotlin + Jetpack Compose + OkHttp | 手机 AI 助手：文件处理、文档生成（Word/PPT/Excel/PDF）、在线对话 |
+| **LocalMind Relay** | 公网服务 | Rust + Axum + SQLite | 设备注册、配对码、WSS 转发、幂等、离线队列；不执行命令 |
 
 ---
 
@@ -73,6 +75,7 @@ LocalAITools/
 │       ├── chat/       # 聊天 + Agent 循环
 │       ├── files/      # 文档生成器（docx/pptx/xlsx/pdf）
 │       └── common/     # 配置、网关、工具定义
+├── relay-server/       # 自建公网语义中继（Rust + Axum + SQLite）
 ├── shared-contract/    # 双端共享契约定义
 └── 开发计划/            # 架构设计文档（含调研、系统设计、安全设计等）
 ```
@@ -120,6 +123,15 @@ LOCAL_FILE_API_KEY=sk-your-key ./gradlew :app:assembleDebug
 
 不传入 key 时构建出的 APK 使用占位符（聊天功能不可用）。
 
+### LocalMind Relay（开发/部署）
+
+```bash
+cargo test --manifest-path relay-server/Cargo.toml
+docker compose -f relay-server/docker-compose.yml up -d --build
+```
+
+部署细节见 `relay-server/deploy/README.md`。Relay 不执行命令、不保存 DeepSeek Key，也不持久化明文文件内容。
+
 ---
 
 ## 📦 发布产物
@@ -134,7 +146,8 @@ LOCAL_FILE_API_KEY=sk-your-key ./gradlew :app:assembleDebug
 ## 📚 文档
 
 - [当前开发路线图](开发计划/开发路线图.md) — 当前唯一权威开发基线，固定阶段顺序、职责边界、安全红线和验收标准。
-- [历史架构设计](开发计划/) — 包含早期行业调研、高层架构、系统设计和用户故事；其中 RelayCloud、云端网关 / 中继方案已失效，仅供历史参考。
+- [Relay-first ADR](开发计划/ADR-002-relay-first.md) — 同类项目调研、传输方案决策与安全边界。
+- [历史架构设计](开发计划/) — 早期行业调研、高层架构、系统设计和用户故事；其中旧 RelayCloud、云端网关方案仅供历史参考。
 
 ---
 

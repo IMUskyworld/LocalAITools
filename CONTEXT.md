@@ -8,7 +8,7 @@
 个人 AI 双端工具（校级项目，≤50 用户）：
 - **LocalMind**（Windows 桌面，Tauri 2 + React + Rust + Python agent）：本地 AI 助手
 - **LocalFile**（Android，Kotlin + Jetpack Compose）：文件 AI 助手
-- ~~RelayCloud~~（云端中继）：**已从代码移除**，仅留 shared-contract 契约与历史文档
+- **LocalMind Relay**（公网语义中继）：ADR-002 已重新立项 Relay-first；服务代码位于 `relay-server/`，只转发加密通道中的版本化 Envelope，不执行命令、不保存 DeepSeek Key、不保存明文文件内容
 
 ## 领域语言（共享词汇）
 
@@ -22,9 +22,10 @@
 
 ## 当前状态（2026-09-10 快照）
 
-- **开发基线**：`开发计划/开发路线图.md`；Phase 0、Phase 1 已完成并验收通过；Phase 2 尚未开始。
+- **开发基线**：`开发计划/开发路线图.md`；Phase 0、Phase 1 已完成并验收通过；Phase 2 已进入 Relay MVP 实施。
 - **Harness v2 已默认为生产路径**：结构化工具错误、单 Turn 重复调用拦截、请求/工具预算、单工具超时、输出截断、Turn 级 Trace。baseline 仅供 A/B 复现。
 - **Phase 1 评测**：同一模型 `deepseek-chat` 两轮 12 任务 A/B，baseline 18/24，Harness v2 24/24；详细结果见 `开发计划/Phase1-Harness评测报告.md`。
+- **Relay MVP 已完成服务端第一版**：`relay-server/` 提供设备注册、一次性配对码、WSS 转发、命令白名单、`command_id` 幂等、离线队列和状态回传；Rust 单元 + 双端 WSS 集成测试通过。
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
@@ -33,7 +34,7 @@
 ## 关键决策（ADR 摘要）
 
 1. **API key 经环境变量注入 + 构建期烘焙**：优先级 = 运行时环境变量 `LOCALMIND_DEEPSEEK_KEY` > 编译期 `option_env!("LOCALMIND_DEEPSEEK_KEY")`（构建时注入，使打包出的 exe 开箱即用）。源码/仓库不存明文 key。⚠️ 烘焙后 key 可从安装包提取，适用于低额度/备用 key，勿用主账号高额度 key。
-2. **云端 RelayCloud 方案已移除**：当前不建设云端中继和 new-api 网关；双端远程控制仍是产品目标，但必须走 Tailscale/局域网受控通道，且先完成 Phase 0-1；状态栏不得展示未实现的“远程设备”占位信息。
+2. **Relay-first 已重新立项（ADR-002）**：双端默认通过自建 WSS Relay 出站连接，不要求普通用户安装 Tailscale。Relay 只负责设备 token、配对、幂等转发、离线队列和状态；Windows 本机权限、确认和审计仍是最终授权边界。旧 RelayCloud 三组件、new-api 网关和公网裸端口仍不复活。
 3. **Agent 工具在 Python 侧实现**（agent_server.py），不依赖 Rust IPC——新增工具 = 改 Python + 重新打包 localmind-agent。
 4. **安全红线**：`run_command`、任意 Shell/executable 和远程任意命令永久禁止暴露给 Agent；`delete_path` 在完成 Permission Gateway、备份、审计和 Undo 前不得开放。
 5. **Harness 先测量再优化**：固定评测集、结构化 Trace、同模型 A/B 是后续性能判断依据；不通过盲目换模型掩盖 Harness 缺陷。v2 已证明成功率收益，但 Prompt/token 成本仍需后续压缩。
