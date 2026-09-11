@@ -34,7 +34,7 @@
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
-- **已打包（Phase 2.5，2026-09-12 00:30，含 shell 工具 + 用户自填 key）**：`LocalMind.exe`（19.6MB，SHA256 `854145680428BC75EC727F3395D62A2E3EA1AAAAEF006E08D8E9B499F50BAD11`）+ `LocalMindSetup.exe`（50.9MB，SHA256 `9DED6B412B2C1828146A7652650BD18A3E9A2CF152829244F26AF7F2B0566165`）+ `LocalFile.apk`（14.9MB，SHA256 `262F795935915968D5049EEAFECDA895E445FE263E264BF90BC5FBDB7811F95F`）；APK 不含任何内置 key（用户自填模式验证通过）。
+- **已打包（Phase 2.5 完成，2026-09-12 01:30，含跨轮记忆 + session summary + shell 工具）**：`LocalMind.exe`（19.7MB，SHA256 `98903C93C2F66005962114B05035918C9DBA092AE297F48D2C8D421F3D87FA2D`）+ `LocalMindSetup.exe`（50.9MB，SHA256 `9DED6B412B2C1828146A7652650BD18A3E9A2CF152829244F26AF7F2B0566165`）+ `LocalFile.apk`（14.9MB，SHA256 `262F795935915968D5049EEAFECDA895E445FE263E264BF90BC5FBDB7811F95F`）；APK 不含任何内置 key（用户自填模式验证通过）。
 
 ## 关键决策（ADR 摘要）
 
