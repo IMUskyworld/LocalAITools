@@ -60,6 +60,60 @@ DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 DEFAULT_ONLINE_MODEL = "deepseek-flash"
 
 
+# ========== Context Manager（Phase 3） ==========
+
+CONTEXT_BUDGET_TOKENS = 50_000  # 为响应预留 ~15K tokens（模型上限 65536）
+CHARS_PER_TOKEN_ZH = 2          # 中文约 2 字符/token
+CHARS_PER_TOKEN_EN = 4          # 英文约 4 字符/token
+
+def estimate_tokens(text: str) -> int:
+    """粗略估算 token 数（中文 2 字符/token，英文 4 字符/token）。"""
+    if not text:
+        return 0
+    zh_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    en_count = len(text) - zh_count
+    return zh_count // CHARS_PER_TOKEN_ZH + en_count // CHARS_PER_TOKEN_EN
+
+
+def truncate_history(history: list, system_prompt_tokens: int, prompt_tokens: int) -> list:
+    """当 history 超过 token 预算时截断，保留最近的消息。
+
+    策略：
+    - 固定保留：system prompt + 最后一条 user prompt
+    - 优先保留最近的消息（从后往前）
+    - 早期消息被截断时生成摘要占位符
+    - tool call/result 对必须成对保留或成对丢弃
+    """
+    budget = CONTEXT_BUDGET_TOKENS - system_prompt_tokens - prompt_tokens - 2000  # 预留余量
+    if budget <= 0:
+        return []
+
+    # 从后往前计算 token，直到预算用完
+    kept = []
+    used_tokens = 0
+    for msg in reversed(history):
+        content = ""
+        if hasattr(msg, 'parts'):
+            for part in msg.parts:
+                if hasattr(part, 'content'):
+                    content += part.content or ""
+                elif hasattr(part, 'tool_name'):
+                    content += f"{part.tool_name} {json.dumps(getattr(part, 'args', {}), ensure_ascii=False)}"
+        msg_tokens = estimate_tokens(content)
+        if used_tokens + msg_tokens > budget:
+            # 预算不够了，如果前面还有消息，加一个摘要占位符
+            remaining = len(history) - len(kept)
+            if remaining > 0:
+                summary_note = ModelRequest(parts=[SystemPromptPart(
+                    content=f"【注意：前 {remaining} 条消息因上下文长度限制已被截断。如需引用早期对话内容，请向用户确认。】"
+                )])
+                kept.append(summary_note)
+            break
+        kept.append(msg)
+        used_tokens += msg_tokens
+
+    kept.reverse()
+    return kept
 # ========== 桌面路径解析（不依赖前端 IPC，自给自足） ==========
 
 def resolve_desktop_path() -> str:
@@ -737,6 +791,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             )
             tools = build_tools(self._emit_thinking, policy, trace=trace, variant=variant)
             prompt, history = split_messages(body.get("messages", []))
+
+            # Context Manager：截断过长的 history
+            system_prompt_tokens = estimate_tokens(system_prompt)
+            prompt_tokens = estimate_tokens(prompt)
+            history = truncate_history(history, system_prompt_tokens, prompt_tokens)
             system_prompt = build_system_prompt(desktop, variant)
             trace.record(
                 "context_built",

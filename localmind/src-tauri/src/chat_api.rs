@@ -164,6 +164,66 @@ pub async fn save_session_summary(
         Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
     }
 }
+#[derive(serde::Serialize)]
+pub struct MemoryEntryDto {
+    pub id: String,
+    pub category: String,
+    pub content: String,
+    pub confidence: f64,
+}
+
+#[tauri::command]
+pub async fn get_memories(
+    state: State<'_, crate::AppState>,
+    limit: Option<i64>,
+) -> Result<AppResponse<Vec<MemoryEntryDto>>, String> {
+    let storage = state.storage.read().await;
+    let lim = limit.unwrap_or(50);
+    match storage.get_memories(lim).await {
+        Ok(entries) => Ok(AppResponse::ok(entries.into_iter().map(|(id, category, content, confidence)| MemoryEntryDto { id, category, content, confidence }).collect())),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
+pub async fn save_memory(
+    state: State<'_, crate::AppState>,
+    category: String,
+    content: String,
+    session_id: Option<String>,
+) -> Result<AppResponse<String>, String> {
+    let storage = state.storage.read().await;
+    match storage.save_memory(&category, &content, session_id.as_deref()).await {
+        Ok(id) => Ok(AppResponse::ok(id)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
+pub async fn delete_memory(
+    state: State<'_, crate::AppState>,
+    memory_id: String,
+) -> Result<AppResponse<bool>, String> {
+    let storage = state.storage.read().await;
+    match storage.delete_memory(&memory_id).await {
+        Ok(()) => Ok(AppResponse::ok(true)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
+pub async fn search_memories(
+    state: State<'_, crate::AppState>,
+    keyword: String,
+    limit: Option<i64>,
+) -> Result<AppResponse<Vec<MemoryEntryDto>>, String> {
+    let storage = state.storage.read().await;
+    let lim = limit.unwrap_or(20);
+    match storage.search_memories(&keyword, lim).await {
+        Ok(entries) => Ok(AppResponse::ok(entries.into_iter().map(|(id, category, content, confidence)| MemoryEntryDto { id, category, content, confidence }).collect())),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
 #[tauri::command]
 pub async fn turn_begin(
     session_id: String,

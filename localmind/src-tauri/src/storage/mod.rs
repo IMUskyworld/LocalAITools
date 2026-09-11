@@ -368,6 +368,76 @@ impl StorageManager {
         self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &key))
             .await
     }
+    pub async fn get_memories(&self, limit: i64) -> Result<Vec<(String, String, String, f64)>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, category, content, confidence FROM memory_entries ORDER BY updated_at DESC LIMIT ?1"
+            ).map_err(|e| format!("database error: {e}"))?;
+            let rows = stmt.query_map(rusqlite::params![limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            }).map_err(|e| format!("database error: {e}"))?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row.map_err(|e| format!("database error: {e}"))?);
+            }
+            Ok(results)
+        })
+        .await
+    }
+
+    pub async fn save_memory(&self, category: &str, content: &str, source_session_id: Option<&str>) -> Result<String, String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let cat = category.to_string();
+        let con = content.to_string();
+        let sid = source_session_id.map(|s| s.to_string());
+        let now = chrono::Utc::now().timestamp_millis();
+        self.with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO memory_entries (id, category, content, confidence, source_session_id, created_at, updated_at, access_count) VALUES (?1, ?2, ?3, 0.8, ?4, ?5, ?5, 0)",
+                rusqlite::params![id, cat, con, sid, now],
+            ).map_err(|e| format!("database error: {e}"))?;
+            Ok(id)
+        })
+        .await
+    }
+
+    pub async fn delete_memory(&self, memory_id: &str) -> Result<(), String> {
+        let mid = memory_id.to_string();
+        self.with_conn(move |conn| {
+            conn.execute("DELETE FROM memory_entries WHERE id = ?1", rusqlite::params![mid])
+                .map_err(|e| format!("database error: {e}"))?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn search_memories(&self, keyword: &str, limit: i64) -> Result<Vec<(String, String, String, f64)>, String> {
+        let kw = format!("%{}%", keyword);
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, category, content, confidence FROM memory_entries WHERE content LIKE ?1 ORDER BY confidence DESC, updated_at DESC LIMIT ?2"
+            ).map_err(|e| format!("database error: {e}"))?;
+            let rows = stmt.query_map(rusqlite::params![kw, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            }).map_err(|e| format!("database error: {e}"))?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row.map_err(|e| format!("database error: {e}"))?);
+            }
+            Ok(results)
+        })
+        .await
+    }
     pub async fn get_session_summary(&self, session_id: &str) -> Result<Option<String>, String> {
         let sid = session_id.to_string();
         self.with_conn(move |conn| {
