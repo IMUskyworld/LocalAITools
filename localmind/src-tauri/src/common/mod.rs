@@ -70,7 +70,7 @@ impl AppConfig {
             gateway: GatewayConfig {
                 wss_url: "wss://relay.example.com/ws".to_string(),
                 api_base: "http://localhost:3000".to_string(),
-                model_display_name: "Deepseek-V4-Pro".to_string(),
+                model_display_name: "DeepSeek V4 Flash".to_string(),
                 api_key: String::new(),  // 已移除遗留 gateway key（死配置，未使用）
             },
             model: ModelConfig {

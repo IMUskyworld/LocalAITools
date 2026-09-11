@@ -49,7 +49,7 @@ export async function streamChat(
   const startTime = Date.now();
 
   const body = {
-    model: 'deepseek-chat',
+    model: 'deepseek-flash',
     messages: toGatewayMessages(messages),
     stream: true,
     max_tokens: 4096,

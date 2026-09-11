@@ -1,3 +1,4 @@
+import { ONLINE_MODEL_LABEL, OFFLINE_MODEL_LABEL } from '@/config/models';
 import { create } from 'zustand';
 import type { ChatSession, ChatMessage, ChatMode, ThinkingStep } from '@/types/chat';
 import { tauriInvoke } from '@/api/ipc';
@@ -85,7 +86,7 @@ function errorText(error: unknown): string {
 }
 
 function modelLabel(mode: ChatMode, selectedModel: string): string {
-  return mode === 'online' ? 'Deepseek-V4-Pro' : (selectedModel || '本地模型');
+  return mode === 'online' ? ONLINE_MODEL_LABEL : (selectedModel || OFFLINE_MODEL_LABEL);
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -95,7 +96,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   mode: 'online' as ChatMode,
   isStreaming: false,
   error: null,
-  modelName: 'Deepseek-V4-Pro',
+  modelName: ONLINE_MODEL_LABEL,
   latencyMs: 0,
   tokensPerSecond: 0,
   ollamaRunning: false,
@@ -187,7 +188,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (!r.data) throw new Error('切换模式失败：后端没有返回模式数据');
       set({
         mode: r.data.mode,
-        modelName: r.data.current_model_label || (mode === 'online' ? 'Deepseek-V4-Pro' : '本地模型'),
+        modelName: r.data.current_model_label || (mode === 'online' ? ONLINE_MODEL_LABEL : OFFLINE_MODEL_LABEL),
         error: null,
       });
     } catch (error) {

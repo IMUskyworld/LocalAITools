@@ -1,9 +1,9 @@
 {
   "gateway_host": "https://api.deepseek.com",
   "api_base": "https://api.deepseek.com/v1",
-  "model_display_name": "DeepSeek",
+  "model_display_name": "DeepSeek V4 Flash",
   "wss_relay": "",
-  "default_model": "deepseek-chat",
+  "default_model": "deepseek-flash",
   "max_context_length": 65536,
   "app_version": "1.0.0",
   "offline_model_size_mb": 4096

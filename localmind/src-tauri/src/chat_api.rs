@@ -123,7 +123,7 @@ pub async fn turn_begin(
     state: State<'_, crate::AppState>,
 ) -> Result<AppResponse<TurnStartDto>, String> {
     let storage = state.storage.read().await;
-    let label = model_label.unwrap_or_else(|| "Deepseek-V4-Pro".to_string());
+    let label = model_label.unwrap_or_else(|| "DeepSeek V4 Flash".to_string());
     match storage.begin_turn(&session_id, &content, &label).await {
         Ok(start) => Ok(AppResponse::ok(TurnStartDto {
             turn_id: start.turn.id,
@@ -144,7 +144,7 @@ pub async fn turn_complete(
     state: State<'_, crate::AppState>,
 ) -> Result<AppResponse<ChatMessageDto>, String> {
     let storage = state.storage.read().await;
-    let label = model_label.unwrap_or_else(|| "Deepseek-V4-Pro".to_string());
+    let label = model_label.unwrap_or_else(|| "DeepSeek V4 Flash".to_string());
     match storage.complete_turn(&turn_id, &content, &label).await {
         Ok(message) => Ok(AppResponse::ok(dto_message(&message))),
         Err(e) => Ok(AppResponse::err("TURN_COMPLETE_FAILED", &e)),

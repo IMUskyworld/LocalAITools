@@ -10,7 +10,7 @@ import com.localmind.localfile.BuildConfig
 object DeepSeekConfig {
     val API_KEY: String = BuildConfig.DEEPSEEK_API_KEY
     const val BASE_URL = "https://api.deepseek.com/v1"
-    const val MODEL = "deepseek-chat"
+    const val MODEL = "deepseek-flash"
 
     /** 文件内容发送上限（字符），防止超大文件撑爆上下文 */
     const val MAX_FILE_CHARS = 30_000

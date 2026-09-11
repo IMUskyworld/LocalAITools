@@ -20,8 +20,12 @@ android {
 
         // DeepSeek API key 注入：本地构建时用 gradle 属性/环境变量 LOCAL_FILE_API_KEY 传真 key，
         // 源码不存明文（公开 GitHub 安全）。未注入时 BuildConfig.DEEPSEEK_API_KEY 为占位符。
+        // 优先级：-PLOCAL_FILE_API_KEY > 环境变量 LOCAL_FILE_API_KEY
+        //        > 环境变量 LOCALMIND_DEEPSEEK_KEY（与 Windows 端共用同一个 key，避免只打包一端时漏注入）
+        //        > 占位符（此时 APK 在线功能不可用）
         val deepseekApiKey = providers.gradleProperty("LOCAL_FILE_API_KEY")
             .orElse(providers.environmentVariable("LOCAL_FILE_API_KEY"))
+            .orElse(providers.environmentVariable("LOCALMIND_DEEPSEEK_KEY"))
             .orElse("我才不给你看API Key呢")
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"${deepseekApiKey.get()}\"")
     }

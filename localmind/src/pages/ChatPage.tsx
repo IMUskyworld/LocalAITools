@@ -1,3 +1,4 @@
+import { ONLINE_MODEL_LABEL, OFFLINE_MODEL_LABEL } from '@/config/models';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useStreamChat } from '@/hooks/useStreamChat';
@@ -275,7 +276,7 @@ export default function ChatPage() {
                 ))}
               </div>
               <div className="welcome-mode">
-                当前模式：{mode === 'online' ? '在线 DeepSeek-V4-Pro' : '离线 本地模型'}
+                当前模式：{mode === 'online' ? `在线 ${ONLINE_MODEL_LABEL}` : `离线 ${OFFLINE_MODEL_LABEL}`}
               </div>
             </div>
           ) : (
@@ -410,7 +411,7 @@ export default function ChatPage() {
             )}
           </div>
           <div className="composer-hint">
-            <span>{mode === 'online' ? 'DeepSeek-V4-Pro' : '本地模型'}</span>
+            <span>{mode === 'online' ? ONLINE_MODEL_LABEL : OFFLINE_MODEL_LABEL}</span>
             <span className="composer-hint-sep" />
             <span>{mode === 'online' ? '在线 · 隐私本地处理' : '离线 · 本地推理'}</span>
             <span className="composer-hint-sep" />

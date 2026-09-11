@@ -1,3 +1,4 @@
+import { ONLINE_MODEL_ID, ONLINE_MODEL_LABEL, OFFLINE_MODEL_LABEL } from '@/config/models';
 import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { runAgent, type AgentMessage } from '@/api/agent';
@@ -50,8 +51,8 @@ export function useStreamChat(): UseStreamChatReturn {
     const controller = new AbortController();
     abortRef.current = controller;
     const activeModelLabel = mode === 'online'
-      ? 'Deepseek-V4-Pro'
-      : (selectedOllamaModel || '本地模型');
+      ? ONLINE_MODEL_LABEL
+      : (selectedOllamaModel || OFFLINE_MODEL_LABEL);
 
     let turnId = '';
     let assistantId = '';
@@ -83,7 +84,7 @@ export function useStreamChat(): UseStreamChatReturn {
 
       const result = await runAgent({
         mode,
-        model: selectedOllamaModel,
+        model: mode === 'online' ? ONLINE_MODEL_ID : selectedOllamaModel,
         messages: agentMessages,
         selectedAttachmentPaths: attachments.map((attachment) => attachment.path),
         signal: controller.signal,

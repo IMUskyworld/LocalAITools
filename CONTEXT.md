@@ -34,7 +34,7 @@
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
-- **已打包（Phase 2，2026-09-11 21:35）**：`LocalMind.exe`（免安装，19.5MB，SHA256 `8CAEAA41D617706C31A16457019AA866D88C26E1BD0D8A0B21E41FBFCF6C7C10`）+ `LocalMindSetup.exe`（NSIS，50.9MB，SHA256 `6B2C8E4456A271C7A6A7C02F69AF2629D259BE655FE3BD2F3CACA9DA44EE05B2`）；`LocalFile.apk`（release，14.8MB，SHA256 `0C9E67C636409B4ED13A4AF0E8E6509ADD87315E3D0D347C971AE33B5FF0CFFC`）；Agent 未变更，SHA256 `58327F347C48092B868F31F140E8E2D4C18945C4718F2D41EAD4D97BCC7698F1`
+- **已打包（Phase 2，2026-09-11 22:06，含模型统一 + 真 key）**：`LocalMind.exe`（19.5MB，SHA256 `0EB61E9A2A3E37223C5DE9820A613E2718186B3D6B980612B7CA8BF101BCD986`）+ `LocalMindSetup.exe`（50.9MB，SHA256 `9DED6B412B2C1828146A7652650BD18A3E9A2CF152829244F26AF7F2B0566165`）+ `LocalFile.apk`（release，14.8MB，SHA256 `980F0ABBCC59EB1C02F6B484ABCE0526C6B81DA3FE2FC2C6E293922E25B3240F`）；`localmind-agent.exe`（22:02 重打，含 `DEFAULT_ONLINE_MODEL=deepseek-flash`）SHA256 `DF5996AB3F18F954828F77DE81D1F859425430F50A236F56BFA2E321ABA107DF`
 
 ## 关键决策（ADR 摘要）
 
@@ -43,7 +43,8 @@
 3. **Agent 工具在 Python 侧实现**（agent_server.py），不依赖 Rust IPC——新增工具 = 改 Python + 重新打包 localmind-agent。
 4. **安全红线**：`run_command`、任意 Shell/executable 和远程任意命令永久禁止暴露给 Agent；`delete_path` 在完成 Permission Gateway、备份、审计和 Undo 前不得开放。
 5. **Harness 先测量再优化**：固定评测集、结构化 Trace、同模型 A/B 是后续性能判断依据；不通过盲目换模型掩盖 Harness 缺陷。v2 已证明成功率收益，但 Prompt/token 成本仍需后续压缩。
-6. **游客/账号双模式共存（ADR-003）**：游客无需账号即可使用本地能力；账号模式使用同一账号识别设备，但同账号不等于自动互控。远程控制必须经过目标设备显式授权和本机确认。
+6. **在线内置模型统一为 `deepseek-flash`（ADR-005）**：官方 `/models` 只登记 `deepseek-flash` / `deepseek-v4-pro`；用户口中的 `deepseek-v4-flash` 是 `deepseek-flash` 的别名（服务端归一），代码固定用官方 ID，展示名 DeepSeek V4 Flash，唯一事实来源为 `localmind/src/config/models.ts` + Agent `DEFAULT_ONLINE_MODEL` + Android `DeepSeekConfig.MODEL`。
+7. **游客/账号双模式共存（ADR-003）**：游客无需账号即可使用本地能力；账号模式使用同一账号识别设备，但同账号不等于自动互控。远程控制必须经过目标设备显式授权和本机确认。
 
 ## 打包要点（踩过的坑，环境不可自明）
 
@@ -55,4 +56,5 @@
 - Agent 重新打包：`localmind\scripts\build\agent-venv\Scripts\python.exe localmind\scripts\pack_agent_exe.py`（venv 只装 pydantic-ai-slim[openai] + pyinstaller）
 - **key 烘焙**：build-localmind.ps1 会从用户环境变量读 LOCALMIND_DEEPSEEK_KEY 并在构建期注入（option_env!），打包出的 LocalMind.exe 开箱即用；源码不含明文 key。build-localmind.ps1 / build-installer.ps1 已改为相对 PSScriptRoot 的路径，NSIS 通过 -DSTAGE_DIR 传暂存目录。
 
+- **Android 打包必须注入 key**：`localfile` 的 key 取 gradle 属性 `LOCAL_FILE_API_KEY` > 环境变量 `LOCAL_FILE_API_KEY` > 环境变量 `LOCALMIND_DEEPSEEK_KEY`；三者都没有时 BuildConfig 里是中文占位符——**APK 表面正常但在线功能全废**，发布前务必确认（可用 dex 搜 `sk-` 验证）。
 - DeepSeek key 已配置为用户环境变量 `LOCALMIND_DEEPSEEK_KEY`（本地测试 key 勿外泄）

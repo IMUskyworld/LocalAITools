@@ -53,6 +53,8 @@ from tool_registry import TOOL_SPECS, ToolRegistry
 AGENT_TOKEN = os.environ.get("LOCALMIND_AGENT_TOKEN", "dev-token")
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+# 在线模式内置模型（官方 ID；双端一致，见 开发计划/ADR-005-default-model-deepseek-flash.md）
+DEFAULT_ONLINE_MODEL = "deepseek-flash"
 
 
 # ========== 桌面路径解析（不依赖前端 IPC，自给自足） ==========
@@ -674,7 +676,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                     provider=OllamaProvider(base_url=OLLAMA_BASE, api_key="not-needed"),
                 )
             else:
-                model_name = body.get("model") or "deepseek-chat"
+                model_name = body.get("model") or DEFAULT_ONLINE_MODEL
                 token = os.environ.get("LOCALMIND_DEEPSEEK_KEY") or body.get("token", "")
                 model = OpenAIChatModel(
                     model_name,

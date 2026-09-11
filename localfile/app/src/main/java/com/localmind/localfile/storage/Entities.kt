@@ -8,7 +8,7 @@ data class SessionEntity(
     @PrimaryKey val id: String,
     val title: String,
     val mode: String = "online", // "online" or "offline"
-    val modelName: String = "DeepSeek",
+    val modelName: String = "DeepSeek V4 Flash",
     val messageCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

@@ -4,7 +4,7 @@
 成功率、工具调用、重复调用、越权拒绝、token、首 token 延迟和总耗时。
 
 用法示例：
-    python localmind/scripts/eval_harness.py --variant both --model deepseek-chat
+    python localmind/scripts/eval_harness.py --variant both --model deepseek-flash
     python localmind/scripts/eval_harness.py --variant v2 --task single_tool_write
 """
 from __future__ import annotations
@@ -496,7 +496,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="LocalMind Phase 1 Harness A/B evaluator")
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
     parser.add_argument("--variant", choices=["baseline", "v2", "both"], default="both")
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--model", default="deepseek-flash")
     parser.add_argument("--mode", choices=["online", "offline"], default="online")
     parser.add_argument("--task", action="append", default=[], help="只运行指定 task id，可重复")
     parser.add_argument("--max-tasks", type=int, default=0)

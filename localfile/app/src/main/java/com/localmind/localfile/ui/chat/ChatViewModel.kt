@@ -1,4 +1,4 @@
-﻿package com.localmind.localfile.ui.chat
+package com.localmind.localfile.ui.chat
 
 import android.app.Application
 import android.net.Uri
@@ -232,5 +232,5 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearGeneratedFile() { _state.update { it.copy(generatedFile = null) } }
 
-    private fun modelLabel() = "DeepSeek"
+    private fun modelLabel() = "DeepSeek V4 Flash"
 }

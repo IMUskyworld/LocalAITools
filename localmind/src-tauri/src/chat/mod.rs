@@ -82,7 +82,7 @@ pub async fn switch_mode(
     let model_label = if current_mode == "offline" {
         "本地模型".to_string()
     } else {
-        "Deepseek-V4-Pro".to_string()
+        "DeepSeek V4 Flash".to_string()
     };
     let inference_state = if current_mode == "offline" {
         state.model_manager.read().await.get_state().await
@@ -107,7 +107,7 @@ pub async fn get_mode(
     let model_label = if current_mode == "offline" {
         "本地模型".to_string()
     } else {
-        "Deepseek-V4-Pro".to_string()
+        "DeepSeek V4 Flash".to_string()
     };
 
     Ok(AppResponse::ok(ChatMode {

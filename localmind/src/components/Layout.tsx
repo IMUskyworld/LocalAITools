@@ -1,3 +1,4 @@
+import { ONLINE_MODEL_LABEL, OFFLINE_MODEL_LABEL } from '@/config/models';
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import ModeSwitch from './ModeSwitch';
@@ -72,7 +73,7 @@ export default function Layout({ children }: LayoutProps) {
     });
   };
 
-  const modelLabel = mode === 'online' ? 'DeepSeek-V4-Pro' : ollamaRunning ? '本地模型' : '离线模式';
+  const modelLabel = mode === 'online' ? ONLINE_MODEL_LABEL : ollamaRunning ? OFFLINE_MODEL_LABEL : '离线模式';
 
   return (
     <div className="app-layout">
@@ -146,7 +147,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
           <div className="statusbar-item statusbar-right">
             <span className="statusbar-mode">
-              {mode === 'online' ? '在线模式 · DeepSeek-V4-Pro' : '离线模式 · 本地模型'}
+              {mode === 'online' ? `在线模式 · ${ONLINE_MODEL_LABEL}` : `离线模式 · ${OFFLINE_MODEL_LABEL}`}
             </span>
           </div>
         </div>

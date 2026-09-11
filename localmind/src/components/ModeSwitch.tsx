@@ -1,3 +1,4 @@
+import { ONLINE_MODEL_LABEL } from '@/config/models';
 import React, { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import type { ChatMode } from '@/types/chat';
@@ -57,7 +58,7 @@ export default function ModeSwitch() {
         >
           <span className="mode-icon">☁</span>
           <span className="mode-label">在线</span>
-          <span className="mode-sub-label">Deepseek-V4-Pro</span>
+          <span className="mode-sub-label">{ONLINE_MODEL_LABEL}</span>
         </button>
         <button
           className={`mode-btn ${currentMode === 'offline' ? 'active' : ''}`}
