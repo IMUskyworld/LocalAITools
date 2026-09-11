@@ -80,6 +80,7 @@ export function useStreamChat(): UseStreamChatReturn {
           role: message.role as 'user' | 'assistant',
           content: message.content,
         }));
+      // 注入本轮实时工具调用（当前 Turn 的 toolLogs 已嵌入 assistant content，此处无需额外处理）
       const agentMessages: AgentMessage[] = withAttachments(baseMessages, attachments);
 
       const result = await runAgent({
@@ -93,7 +94,10 @@ export function useStreamChat(): UseStreamChatReturn {
       });
       partialContent = result.content;
 
-      const saved = await completeTurn(turnId, result.content, activeModelLabel);
+      // 将工具调用嵌入消息内容，使跨轮对话保留完整上下文
+      const contentWithTools = embedToolLogs(result.content, result.toolLogs);
+
+      const saved = await completeTurn(turnId, contentWithTools, activeModelLabel);
       updateMessage(sessionId, assistantId, {
         id: saved.id,
         content: saved.content,
@@ -143,6 +147,16 @@ export function useStreamChat(): UseStreamChatReturn {
   return { sendMessage, stopGeneration, isStreaming, error };
 }
 
+// ========== 工具调用嵌入（跨轮记忆修复） ==========
+
+function embedToolLogs(content: string, toolLogs: { name: string; args: string; output: string; success: boolean }[]): string {
+  if (!toolLogs || toolLogs.length === 0) return content;
+  const blocks = toolLogs.map((log) => {
+    const argsStr = typeof log.args === 'string' ? log.args : JSON.stringify(log.args);
+    return `[调用工具:${log.name}] ${argsStr}\n[工具结果:${log.name}] ${log.success ? '' : '(失败) '}${log.output}`;
+  });
+  return blocks.join('\n') + '\n' + content;
+}
 // ========== 附件注入 ==========
 
 interface ConvMsg {

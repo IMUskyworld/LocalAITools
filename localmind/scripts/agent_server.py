@@ -18,6 +18,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import re
 import os
 import subprocess
 import threading
@@ -39,6 +40,8 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     TextPart,
     TextPartDelta,
+    ToolCallPart,
+    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.models.ollama import OllamaModel
