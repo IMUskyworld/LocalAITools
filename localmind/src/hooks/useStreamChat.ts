@@ -1,6 +1,7 @@
 import { ONLINE_MODEL_ID, ONLINE_MODEL_LABEL, OFFLINE_MODEL_LABEL } from '@/config/models';
 import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { tauriInvoke } from '@/api/ipc';
 import { runAgent, type AgentMessage } from '@/api/agent';
 import { generateId } from '@/utils/helpers';
 import type { ChatMessage } from '@/types/chat';
@@ -74,14 +75,23 @@ export function useStreamChat(): UseStreamChatReturn {
         modelName: activeModelLabel,
       });
 
+      // 加载 session summary（跨轮记忆注入）
+      let sessionSummary = '';
+      try {
+        const sr: any = await tauriInvoke('get_session_summary', { sessionId });
+        if (sr?.data) sessionSummary = sr.data;
+      } catch {}
+
       const baseMessages = getCurrentMessages()
         .filter((message) => message.id !== assistantId)
         .map((message) => ({
           role: message.role as 'user' | 'assistant',
           content: message.content,
         }));
-      // 注入本轮实时工具调用（当前 Turn 的 toolLogs 已嵌入 assistant content，此处无需额外处理）
-      const agentMessages: AgentMessage[] = withAttachments(baseMessages, attachments);
+      const agentMessages: AgentMessage[] = withSummary(
+        withAttachments(baseMessages, attachments),
+        sessionSummary,
+      );
 
       const result = await runAgent({
         mode,
@@ -98,6 +108,12 @@ export function useStreamChat(): UseStreamChatReturn {
       const contentWithTools = embedToolLogs(result.content, result.toolLogs);
 
       const saved = await completeTurn(turnId, contentWithTools, activeModelLabel);
+
+      // 保存 session summary（异步，不阻塞 UI）
+      const turnSummary = content.substring(0, 200).trim();
+      if (turnSummary) {
+        tauriInvoke('save_session_summary', { sessionId, summary: turnSummary }).catch(() => {});
+      }
       updateMessage(sessionId, assistantId, {
         id: saved.id,
         content: saved.content,
@@ -147,6 +163,22 @@ export function useStreamChat(): UseStreamChatReturn {
   return { sendMessage, stopGeneration, isStreaming, error };
 }
 
+// ========== Session Summary 注入 ==========
+
+function withSummary(messages: AgentMessage[], summary: string): AgentMessage[] {
+  if (!summary) return messages;
+  const summaryBlock =
+    '【历史对话摘要】\n' +
+    '以下是之前对话的摘要，请在回答时参考这些上下文：\n' +
+    summary;
+  if (messages.length > 0 && messages[0].role === 'system') {
+    return [
+      { role: 'system', content: `${messages[0].content}\n\n${summaryBlock}` },
+      ...messages.slice(1),
+    ];
+  }
+  return [{ role: 'system', content: summaryBlock }, ...messages];
+}
 // ========== 工具调用嵌入（跨轮记忆修复） ==========
 
 function embedToolLogs(content: string, toolLogs: { name: string; args: string; output: string; success: boolean }[]): string {

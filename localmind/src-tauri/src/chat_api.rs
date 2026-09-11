@@ -140,6 +140,31 @@ pub async fn set_api_key(
 }
 
 #[tauri::command]
+pub async fn get_session_summary(
+    state: State<'_, crate::AppState>,
+    session_id: String,
+) -> Result<AppResponse<String>, String> {
+    let storage = state.storage.read().await;
+    match storage.get_session_summary(&session_id).await {
+        Ok(Some(s)) => Ok(AppResponse::ok(s)),
+        Ok(None) => Ok(AppResponse::ok(String::new())),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
+pub async fn save_session_summary(
+    state: State<'_, crate::AppState>,
+    session_id: String,
+    summary: String,
+) -> Result<AppResponse<bool>, String> {
+    let storage = state.storage.read().await;
+    match storage.save_session_summary(&session_id, &summary).await {
+        Ok(()) => Ok(AppResponse::ok(true)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+#[tauri::command]
 pub async fn turn_begin(
     session_id: String,
     content: String,

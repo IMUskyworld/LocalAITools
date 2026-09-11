@@ -368,6 +368,33 @@ impl StorageManager {
         self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &key))
             .await
     }
+    pub async fn get_session_summary(&self, session_id: &str) -> Result<Option<String>, String> {
+        let sid = session_id.to_string();
+        self.with_conn(move |conn| {
+            conn.query_row(
+                "SELECT summary FROM session_summaries WHERE session_id = ?1",
+                rusqlite::params![sid],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| format!("database error: {e}"))
+        })
+        .await
+    }
+
+    pub async fn save_session_summary(&self, session_id: &str, summary: &str) -> Result<(), String> {
+        let sid = session_id.to_string();
+        let sum = summary.to_string();
+        self.with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO session_summaries (session_id, summary, covers_until_message_id, token_count, created_at, updated_at) VALUES (?1, ?2, '', 0, ?3, ?3) ON CONFLICT(session_id) DO UPDATE SET summary = excluded.summary, updated_at = excluded.updated_at",
+                rusqlite::params![sid, sum, chrono::Utc::now().timestamp_millis()],
+            )
+            .map_err(|e| format!("database error: {e}"))?;
+            Ok(())
+        })
+        .await
+    }
     pub async fn get_device_id(&self) -> Result<String, String> {
         self.with_conn(|conn| {
             if let Some(value) = get_setting(conn, "device_id")? {
