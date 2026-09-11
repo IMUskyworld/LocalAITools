@@ -7,7 +7,10 @@ pub struct Config {
     pub max_message_bytes: usize,
     pub max_pending_messages_per_device: i64,
     pub pairing_code_ttl_seconds: i64,
+    pub pairing_request_ttl_seconds: i64,
     pub command_ttl_seconds: i64,
+    pub access_token_ttl_seconds: i64,
+    pub refresh_token_ttl_seconds: i64,
 }
 
 impl Config {
@@ -42,6 +45,13 @@ impl Config {
             .map_err(|err| format!("invalid RELAY_PAIRING_TTL_SECONDS: {err}"))?
             .unwrap_or(300);
 
+        let pairing_request_ttl_seconds = env::var("RELAY_PAIRING_REQUEST_TTL_SECONDS")
+            .ok()
+            .map(|value| value.parse::<i64>())
+            .transpose()
+            .map_err(|err| format!("invalid RELAY_PAIRING_REQUEST_TTL_SECONDS: {err}"))?
+            .unwrap_or(10 * 60);
+
         let command_ttl_seconds = env::var("RELAY_COMMAND_TTL_SECONDS")
             .ok()
             .map(|value| value.parse::<i64>())
@@ -49,13 +59,30 @@ impl Config {
             .map_err(|err| format!("invalid RELAY_COMMAND_TTL_SECONDS: {err}"))?
             .unwrap_or(7 * 24 * 60 * 60);
 
+        let access_token_ttl_seconds = env::var("RELAY_ACCESS_TOKEN_TTL_SECONDS")
+            .ok()
+            .map(|value| value.parse::<i64>())
+            .transpose()
+            .map_err(|err| format!("invalid RELAY_ACCESS_TOKEN_TTL_SECONDS: {err}"))?
+            .unwrap_or(30 * 60);
+
+        let refresh_token_ttl_seconds = env::var("RELAY_REFRESH_TOKEN_TTL_SECONDS")
+            .ok()
+            .map(|value| value.parse::<i64>())
+            .transpose()
+            .map_err(|err| format!("invalid RELAY_REFRESH_TOKEN_TTL_SECONDS: {err}"))?
+            .unwrap_or(30 * 24 * 60 * 60);
+
         Ok(Self {
             bind_addr,
             db_path,
             max_message_bytes,
             max_pending_messages_per_device,
             pairing_code_ttl_seconds,
+            pairing_request_ttl_seconds,
             command_ttl_seconds,
+            access_token_ttl_seconds,
+            refresh_token_ttl_seconds,
         })
     }
 }

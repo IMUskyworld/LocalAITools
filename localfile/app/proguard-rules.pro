@@ -14,3 +14,7 @@
 
 # ZXing
 -keep class com.google.zxing.** { *; }
+
+# pdfbox-android: JPX filter references optional JP2 classes not bundled on Android
+-dontwarn com.gemalto.jp2.JP2Decoder
+-dontwarn com.gemalto.jp2.JP2Encoder

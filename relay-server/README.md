@@ -33,21 +33,46 @@ LocalMind / LocalFile 的跨网络语义中继服务。目标是让用户不需�
 | `DELETE` | `/v1/pairings/{tenant_id}` | 解除配对 |
 | `GET` | `/ws` | WebSocket 升级；需要 `X-Device-Id` 和 `Authorization: Bearer <token>` |
 
-## 规划中的账号层
+## 账号层
 
-当前服务端实现的是设备注册、设备 token、一次性配对码和 WSS 转发。游客模式继续使用这条路径即可。
+游客模式继续使用设备注册、设备 token、一次性配对码和 WSS 转发，无需账号。
 
-账号模式的设计见 `开发计划/ADR-003-account-and-guest-mode.md`。后续将在不破坏现有设备 API 的前提下增加：
+账号模式在设备身份之上增加用户身份、设备归属和控制授权。账号只解决“用户是谁”和“设备属于谁”；同一账号下的手机不能自动控制电脑，必须由 Windows 本机确认建立控制配对。
 
-- `/v1/auth/register`
-- `/v1/auth/login`
-- `/v1/auth/refresh`
-- `/v1/auth/logout`
-- `/v1/auth/me`
-- `/v1/account/devices`
-- 账号级设备授权和撤销接口
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/v1/auth/register` | 邮箱 + 密码注册，返回 access / refresh token |
+| `POST` | `/v1/auth/login` | 登录；可选绑定当前设备 |
+| `POST` | `/v1/auth/refresh` | 旋转 refresh token，签发新 token 对 |
+| `POST` | `/v1/auth/logout` | 撤销当前 refresh token |
+| `GET` | `/v1/auth/me` | 查询当前账号 |
+| `GET` | `/v1/account/devices` | 查询账号下的设备列表 |
+| `POST` | `/v1/account/devices/claim` | 将设备登记到账号（需同时带账号 token 和设备 token） |
+| `DELETE` | `/v1/account/devices/{device_id}` | 从账号移除设备，并撤销其控制配对 |
+| `GET` | `/v1/control/pairing-requests` | 查询与当前设备相关的控制授权请求 |
+| `POST` | `/v1/control/pairing-requests` | Android 设备发起控制授权请求 |
+| `POST` | `/v1/control/pairing-requests/{id}/approve` | Windows 目标设备本机确认 |
+| `POST` | `/v1/control/pairing-requests/{id}/reject` | Windows 目标设备拒绝 |
+| `GET` | `/v1/control/pairings` | 查询当前设备有效的控制配对 |
+| `DELETE` | `/v1/control/pairings/{tenant_id}` | 撤销控制配对 |
 
-账号只解决“用户是谁”和“设备属于谁”；同一账号下的手机不能自动控制电脑，必须由 Windows 本机确认建立控制配对。
+实现约束：
+
+- 密码使用 Argon2id 加盐哈希，服务端不保存明文密码。
+- access token 短期有效（默认 30 分钟），refresh token 可旋转（默认 30 天），服务端只保存哈希。
+- 设备 token 与账号 token 分离。
+- 控制授权请求默认 10 分钟过期，同一对设备同时最多一个 `pending` 请求。
+- 只有目标 Windows 设备可以批准或拒绝请求；批准后写入 `device_pairings` 并带权限列表。
+- 已批准的控制配对会限制发送方向（只有 controller 能发命令）和动作白名单。
+- 解绑设备会级联撤销其控制配对和当前设备的登录会话。
+
+环境变量：
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `RELAY_ACCESS_TOKEN_TTL_SECONDS` | `1800` | access token 有效期 |
+| `RELAY_REFRESH_TOKEN_TTL_SECONDS` | `2592000` | refresh token 有效期 |
+| `RELAY_PAIRING_REQUEST_TTL_SECONDS` | `600` | 控制授权请求有效期 |
 
 ## 本地运行
 

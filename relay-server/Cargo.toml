@@ -9,6 +9,7 @@ description = "Self-hosted WSS relay for paired LocalMind and LocalFile devices"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws", "macros"] }
+argon2 = "0.5"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
@@ -23,7 +24,7 @@ sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["limit", "timeout", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "limit", "timeout", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4", "serde"] }

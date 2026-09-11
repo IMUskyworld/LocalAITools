@@ -43,6 +43,14 @@ object ErrorCodes {
     const val REMOTE_CONTROL_DISABLED = "402004"
     const val AUTH_TICKET_INVALID = "403001"
     const val UNAUTHORIZED_ACCESS = "403002"
+    const val EMAIL_ALREADY_REGISTERED = "403003"
+    const val INVALID_CREDENTIALS = "403004"
+    const val TOKEN_INVALID_OR_EXPIRED = "403005"
+    const val ACCOUNT_DISABLED = "403006"
+    const val DEVICE_NOT_ENROLLED = "403007"
+    const val PAIRING_REQUEST_EXPIRED = "403008"
+    const val DEVICE_ALREADY_ENROLLED = "403009"
+    const val PAIRING_REQUEST_CONFLICT = "403010"
 
     // Relay (50xxxx)
     const val PAIRING_SERVICE_ERROR = "501001"
@@ -54,4 +62,34 @@ object ErrorCodes {
     const val AI_CHANNEL_ERROR = "601001"
     const val TOKEN_AUTH_FAILED = "601002"
     const val MODEL_MAPPING_NOT_CONFIGURED = "602001"
+
+    private val messages: Map<String, String> = mapOf(
+        UNKNOWN to "未知错误",
+        NETWORK_UNREACHABLE to "网络不可达",
+        REQUEST_TIMEOUT to "请求超时",
+        GATEWAY_ERROR to "网关异常",
+        TOKEN_QUOTA_EXHAUSTED to "令牌额度已耗尽",
+        OFFLINE_MODEL_NOT_READY to "离线模型未就绪",
+        ONLINE_SERVICE_UNAVAILABLE to "在线服务暂时不可用",
+        DEVICE_NOT_PAIRED to "设备未配对",
+        PAIRING_CODE_INVALID to "配对码无效或已过期",
+        PAIRING_CODE_USED to "配对码已使用",
+        PAIRING_CODE_FAILED to "配对码签发失败",
+        REMOTE_DEVICE_OFFLINE to "对端设备离线",
+        ACTION_NOT_IN_WHITELIST to "操作不在白名单范围内",
+        DANGEROUS_ACTION_REJECTED to "危险操作已被拒绝",
+        REMOTE_CONTROL_DISABLED to "远程控制未开启",
+        AUTH_TICKET_INVALID to "认证票据无效或已过期",
+        UNAUTHORIZED_ACCESS to "越权访问拒绝",
+        EMAIL_ALREADY_REGISTERED to "该邮箱已注册",
+        INVALID_CREDENTIALS to "邮箱或密码错误",
+        TOKEN_INVALID_OR_EXPIRED to "登录令牌无效或已过期",
+        ACCOUNT_DISABLED to "账号已被禁用",
+        DEVICE_NOT_ENROLLED to "设备尚未绑定到该账号",
+        PAIRING_REQUEST_EXPIRED to "控制授权请求已过期",
+        DEVICE_ALREADY_ENROLLED to "设备已绑定到其他账号",
+        PAIRING_REQUEST_CONFLICT to "控制授权请求状态冲突"
+    )
+
+    fun getMessage(code: String): String = messages[code] ?: "未知错误 ($code)"
 }

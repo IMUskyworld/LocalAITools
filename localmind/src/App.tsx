@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import ChatPage from './pages/ChatPage';
 import ModelsPage from './pages/ModelsPage';
 import SettingsPage from './pages/SettingsPage';
+import AccountPage from './pages/AccountPage';
 
 function App() {
   useEffect(() => {
@@ -23,6 +24,7 @@ function App() {
         <Route path="/" element={<ChatPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/account" element={<AccountPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

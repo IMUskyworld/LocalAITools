@@ -15,6 +15,14 @@ pub const ERROR_NOT_PAIRED: &str = "401001";
 pub const ERROR_INVALID_PAIRING_CODE: &str = "401002";
 pub const ERROR_PAIRING_CODE_USED: &str = "401003";
 pub const ERROR_ACTION_NOT_ALLOWED: &str = "402002";
+pub const ERROR_EMAIL_ALREADY_REGISTERED: &str = "403003";
+pub const ERROR_INVALID_CREDENTIALS: &str = "403004";
+pub const ERROR_TOKEN_INVALID: &str = "403005";
+pub const ERROR_ACCOUNT_DISABLED: &str = "403006";
+pub const ERROR_DEVICE_NOT_ENROLLED: &str = "403007";
+pub const ERROR_PAIRING_REQUEST_EXPIRED: &str = "403008";
+pub const ERROR_DEVICE_ALREADY_ENROLLED: &str = "403009";
+pub const ERROR_PAIRING_REQUEST_CONFLICT: &str = "403010";
 
 fn allowed_actions() -> &'static HashSet<&'static str> {
     static ALLOWED: OnceLock<HashSet<&'static str>> = OnceLock::new();
@@ -37,7 +45,7 @@ fn allowed_actions() -> &'static HashSet<&'static str> {
     })
 }
 
-fn is_allowed_action(action: &str) -> bool {
+pub(crate) fn is_allowed_action(action: &str) -> bool {
     allowed_actions().contains(action)
 }
 

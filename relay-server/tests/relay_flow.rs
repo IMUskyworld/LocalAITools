@@ -37,7 +37,10 @@ async fn paired_devices_can_relay_state_and_replay_offline_queue() {
         max_message_bytes: 64 * 1024,
         max_pending_messages_per_device: 500,
         pairing_code_ttl_seconds: 300,
+        pairing_request_ttl_seconds: 600,
         command_ttl_seconds: 7 * 24 * 60 * 60,
+        access_token_ttl_seconds: 30 * 60,
+        refresh_token_ttl_seconds: 30 * 24 * 60 * 60,
     };
     let db = Db::open(&config.db_path).unwrap();
     let app = build_router(AppState::new(db, config));

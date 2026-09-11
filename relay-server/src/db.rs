@@ -102,7 +102,13 @@ pub struct Pairing {
 }
 
 #[derive(Clone, Debug)]
-pub struct Route;
+pub struct Route {
+    /// `None` preserves legacy guest pairings, where the protocol action whitelist is the limit.
+    /// `Some` is an account-approved pairing and is limited to its explicitly approved actions.
+    pub permissions: Option<Vec<String>>,
+    pub controller_device_id: Option<String>,
+    pub target_device_id: Option<String>,
+}
 
 #[derive(Clone, Debug)]
 pub struct PendingMessage {
@@ -119,7 +125,7 @@ pub struct CommandRecord {
 
 #[derive(Clone)]
 pub struct Db {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
     path: Option<PathBuf>,
 }
 
@@ -406,18 +412,55 @@ impl Db {
 
     pub fn route_between(&self, tenant_id: &str, from: &str, to: &str) -> Result<Option<Route>> {
         let conn = self.conn.lock();
-        conn.query_row(
-            "SELECT tenant_id, windows_device_id, android_device_id
-             FROM pairings
-             WHERE tenant_id = ?1
-               AND revoked_at IS NULL
-               AND ((windows_device_id = ?2 AND android_device_id = ?3)
-                    OR (android_device_id = ?2 AND windows_device_id = ?3))",
-            params![tenant_id, from, to],
-            |_row| Ok(Route),
-        )
-        .optional()
-        .map_err(Into::into)
+        let legacy = conn
+            .query_row(
+                "SELECT tenant_id, windows_device_id, android_device_id
+                 FROM pairings
+                 WHERE tenant_id = ?1
+                   AND revoked_at IS NULL
+                   AND ((windows_device_id = ?2 AND android_device_id = ?3)
+                        OR (android_device_id = ?2 AND windows_device_id = ?3))",
+                params![tenant_id, from, to],
+                |_row| {
+                    Ok(Route {
+                        permissions: None,
+                        controller_device_id: None,
+                        target_device_id: None,
+                    })
+                },
+            )
+            .optional()?;
+        if legacy.is_some() {
+            return Ok(legacy);
+        }
+
+        let account_pairing = conn
+            .query_row(
+                "SELECT permissions_json, controller_device_id, target_device_id
+                 FROM device_pairings
+                 WHERE tenant_id = ?1
+                   AND revoked_at IS NULL
+                   AND ((controller_device_id = ?2 AND target_device_id = ?3)
+                        OR (controller_device_id = ?3 AND target_device_id = ?2))",
+                params![tenant_id, from, to],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((permissions_json, controller_device_id, target_device_id)) = account_pairing
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Route {
+            permissions: Some(serde_json::from_str(&permissions_json)?),
+            controller_device_id: Some(controller_device_id),
+            target_device_id: Some(target_device_id),
+        }))
     }
 
     pub fn revoke_pairing(&self, tenant_id: &str, device_id: &str) -> Result<()> {
@@ -617,10 +660,14 @@ fn migrate(conn: &Connection) -> Result<()> {
         conn.execute_batch(SCHEMA_V1)?;
         conn.pragma_update(None, "user_version", 1)?;
     }
+    if version < 2 {
+        crate::account_db::migrate_v2(conn)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
     Ok(())
 }
 
-fn get_device(conn: &Connection, device_id: &str) -> Result<Device> {
+pub(crate) fn get_device(conn: &Connection, device_id: &str) -> Result<Device> {
     conn.query_row(
         "SELECT id, device_name, platform, model, os_version, created_at, last_seen
          FROM devices WHERE id = ?1",
@@ -702,13 +749,13 @@ fn prune_messages(
     Ok(())
 }
 
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn hash_token(token: &str) -> String {
+pub(crate) fn hash_token(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
     hex_encode(&digest)
 }
@@ -727,7 +774,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     left.len() == right.len() && bool::from(left.ct_eq(right))
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

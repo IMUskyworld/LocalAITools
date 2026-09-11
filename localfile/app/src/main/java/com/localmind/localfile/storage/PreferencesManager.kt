@@ -23,7 +23,12 @@ class PreferencesManager(private val context: Context) {
         private val KEY_GATEWAY_HOST = stringPreferencesKey("gateway_host")
         private val KEY_WSS_RELAY = stringPreferencesKey("wss_relay")
         private val KEY_DEVICE_ID = stringPreferencesKey("device_id")
+        private val KEY_DEVICE_TOKEN = stringPreferencesKey("device_token")
         private val KEY_DEVICE_NAME = stringPreferencesKey("device_name")
+        private val KEY_ACCOUNT_ACCESS_TOKEN = stringPreferencesKey("account_access_token")
+        private val KEY_ACCOUNT_REFRESH_TOKEN = stringPreferencesKey("account_refresh_token")
+        private val KEY_ACCOUNT_EMAIL = stringPreferencesKey("account_email")
+        private val KEY_ACCOUNT_DISPLAY_NAME = stringPreferencesKey("account_display_name")
         private val KEY_PAIRED_DEVICE_ID = stringPreferencesKey("paired_device_id")
         private val KEY_PAIRED_DEVICE_NAME = stringPreferencesKey("paired_device_name")
         private val KEY_TENANT_ID = stringPreferencesKey("tenant_id")
@@ -76,6 +81,57 @@ class PreferencesManager(private val context: Context) {
 
     suspend fun setDeviceId(id: String) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
+    }
+
+    val deviceToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_DEVICE_TOKEN] ?: ""
+    }
+
+    suspend fun setDeviceCredentials(id: String, token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_DEVICE_ID] = id
+            prefs[KEY_DEVICE_TOKEN] = token
+        }
+    }
+
+    // Account session
+    val accountAccessToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_ACCESS_TOKEN] ?: ""
+    }
+
+    val accountRefreshToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_REFRESH_TOKEN] ?: ""
+    }
+
+    val accountEmail: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_EMAIL] ?: ""
+    }
+
+    val accountDisplayName: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_DISPLAY_NAME] ?: ""
+    }
+
+    suspend fun setAccountSession(
+        accessToken: String,
+        refreshToken: String,
+        email: String,
+        displayName: String
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_ACCOUNT_ACCESS_TOKEN] = accessToken
+            prefs[KEY_ACCOUNT_REFRESH_TOKEN] = refreshToken
+            prefs[KEY_ACCOUNT_EMAIL] = email
+            prefs[KEY_ACCOUNT_DISPLAY_NAME] = displayName
+        }
+    }
+
+    suspend fun clearAccountSession() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_ACCOUNT_ACCESS_TOKEN)
+            prefs.remove(KEY_ACCOUNT_REFRESH_TOKEN)
+            prefs.remove(KEY_ACCOUNT_EMAIL)
+            prefs.remove(KEY_ACCOUNT_DISPLAY_NAME)
+        }
     }
 
     // Device name

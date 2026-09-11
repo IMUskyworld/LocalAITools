@@ -16,16 +16,22 @@ use localmind_shared_contract::{CommandEnvelope, CommandState, EnvelopeType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::broadcast;
-use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    timeout::TimeoutLayer,
+    trace::TraceLayer,
+};
 use uuid::Uuid;
 
 use crate::{
+    account,
     config::Config,
     db::{Db, Device, Pairing},
     error::{RelayError, Result},
     hub::Hub,
     protocol::{
-        validate_client_envelope, ERROR_INVALID_ENVELOPE, ERROR_NOT_PAIRED, ERROR_UNAUTHORIZED,
+        validate_client_envelope, ERROR_ACTION_NOT_ALLOWED, ERROR_INVALID_ENVELOPE,
+        ERROR_NOT_PAIRED, ERROR_UNAUTHORIZED,
     },
 };
 
@@ -51,6 +57,34 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/v1/auth/register", post(account::register))
+        .route("/v1/auth/login", post(account::login))
+        .route("/v1/auth/refresh", post(account::refresh))
+        .route("/v1/auth/logout", post(account::logout))
+        .route("/v1/auth/me", get(account::me))
+        .route("/v1/account/devices", get(account::list_devices))
+        .route("/v1/account/devices/claim", post(account::claim_device))
+        .route(
+            "/v1/account/devices/{device_id}",
+            delete(account::remove_device),
+        )
+        .route(
+            "/v1/control/pairing-requests",
+            get(account::list_pairing_requests).post(account::create_pairing_request),
+        )
+        .route(
+            "/v1/control/pairing-requests/{request_id}/approve",
+            post(account::approve_pairing_request),
+        )
+        .route(
+            "/v1/control/pairing-requests/{request_id}/reject",
+            post(account::reject_pairing_request),
+        )
+        .route("/v1/control/pairings", get(account::list_control_pairings))
+        .route(
+            "/v1/control/pairings/{tenant_id}",
+            delete(account::revoke_control_pairing),
+        )
         .route("/v1/devices/register", post(register_device))
         .route("/v1/pairing-codes", post(issue_pairing_code))
         .route("/v1/pairings", get(list_pairings))
@@ -58,6 +92,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/pairings/{tenant_id}", delete(revoke_pairing))
         .route("/ws", get(websocket))
         .fallback(not_found)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -384,11 +424,32 @@ fn ensure_pair_route(state: &AppState, device: &Device, envelope: &CommandEnvelo
     let route = state
         .db
         .route_between(&envelope.tenant_id, &device.id, &envelope.to_device_id)?;
-    if route.is_none() {
+    let Some(route) = route else {
         return Err(RelayError::forbidden(
             ERROR_NOT_PAIRED,
             "devices are not paired",
         ));
+    };
+    if envelope.envelope_type == EnvelopeType::Command {
+        if let Some(controller_device_id) = &route.controller_device_id {
+            if controller_device_id != &device.id {
+                return Err(RelayError::forbidden(
+                    ERROR_UNAUTHORIZED,
+                    "only the approved controller device can send remote commands",
+                ));
+            }
+        }
+        if let Some(permissions) = route.permissions {
+            if !permissions
+                .iter()
+                .any(|permission| permission == &envelope.action_type)
+            {
+                return Err(RelayError::forbidden(
+                    ERROR_ACTION_NOT_ALLOWED,
+                    "action is not included in the approved pairing permissions",
+                ));
+            }
+        }
     }
     Ok(())
 }

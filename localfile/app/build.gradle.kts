@@ -28,6 +28,9 @@ android {
 
     buildTypes {
         release {
+            // Demo builds use the standard Android debug key so the APK is directly installable.
+            // Replace with a private keystore before a public store release.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

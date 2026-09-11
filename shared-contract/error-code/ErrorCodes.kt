@@ -39,6 +39,14 @@ object ErrorCodes {
     const val REMOTE_CONTROL_DISABLED = "402004"
     const val AUTH_TICKET_INVALID = "403001"
     const val UNAUTHORIZED = "403002"
+    const val EMAIL_ALREADY_REGISTERED = "403003"
+    const val INVALID_CREDENTIALS = "403004"
+    const val TOKEN_INVALID_OR_EXPIRED = "403005"
+    const val ACCOUNT_DISABLED = "403006"
+    const val DEVICE_NOT_ENROLLED = "403007"
+    const val PAIRING_REQUEST_EXPIRED = "403008"
+    const val DEVICE_ALREADY_ENROLLED = "403009"
+    const val PAIRING_REQUEST_CONFLICT = "403010"
 
     val errorMessages: Map<String, String> = mapOf(
         UNKNOWN to "未知错误",
@@ -55,6 +63,14 @@ object ErrorCodes {
         REMOTE_OFFLINE to "电脑当前离线",
         NOT_IN_WHITELIST to "该操作不在允许范围",
         DANGEROUS_ACTION_REJECTED to "危险操作已被拒绝",
+        EMAIL_ALREADY_REGISTERED to "该邮箱已注册",
+        INVALID_CREDENTIALS to "邮箱或密码错误",
+        TOKEN_INVALID_OR_EXPIRED to "登录令牌无效或已过期",
+        ACCOUNT_DISABLED to "账号已被禁用",
+        DEVICE_NOT_ENROLLED to "设备尚未绑定到该账号",
+        PAIRING_REQUEST_EXPIRED to "控制授权请求已过期",
+        DEVICE_ALREADY_ENROLLED to "设备已绑定到其他账号",
+        PAIRING_REQUEST_CONFLICT to "控制授权请求状态冲突",
     )
 
     fun getMessage(code: String): String =
