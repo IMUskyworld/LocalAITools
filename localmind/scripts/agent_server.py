@@ -81,7 +81,7 @@ def resolve_desktop_path() -> str:
 def build_system_prompt(desktop_path: str, variant: str = "baseline") -> str:
     desktop = desktop_path or "C:/Users/Public/Desktop"
     base = f"""你是 LocalMind，一个运行在 Windows 电脑上的 AI 助手。
-你能直接操作电脑。可用工具：write_file（写文件）、read_file（读文件）、list_dir（列目录）、move_file（移动/整理文件）、open_app（打开应用）、read_clipboard（读剪贴板）、create_doc（生成 PPT/Word/Excel/PDF 文档）。
+你能直接操作电脑。可用工具：write_file（写文件）、read_file（读文件）、list_dir（列目录）、move_file（移动/整理文件）、open_app（打开应用）、read_clipboard（读剪贴板）、create_doc（生成 PPT/Word/Excel/PDF 文档）、run_command（执行任意 shell 命令：安装软件、运行脚本、Git、系统管理等）、delete_path（删除文件或目录）。
 当用户要求创建文件、写文件、生成文档时，必须调用对应工具实际执行，绝不能只在回复里口头说"已创建"或"已完成"——只有工具执行返回成功才算真的完成。
 如果用户只是聊天，直接回答即可。所有回答请使用中文。
 
@@ -336,6 +336,47 @@ def build_tools(
         except Exception as e:
             return f"打开失败: {e}"
 
+    def run_command(command: str) -> str:
+        """执行任意 shell 命令。可用于安装软件、运行脚本、系统管理、Git 操作等。command 为完整的命令行字符串，会通过 PowerShell 执行。返回命令的 stdout 和 stderr。"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            parts = []
+            if result.stdout and result.stdout.strip():
+                parts.append(f"【stdout】\n{result.stdout.strip()}")
+            if result.stderr and result.stderr.strip():
+                parts.append(f"【stderr】\n{result.stderr.strip()}")
+            if not parts:
+                parts.append("(无输出)")
+            status = "成功" if result.returncode == 0 else f"退出码 {result.returncode}"
+            return f"命令执行{status}:\n" + "\n".join(parts)
+        except subprocess.TimeoutExpired:
+            return _structured_error("COMMAND_TIMEOUT", "命令执行超时（30秒限制）", retryable=False)
+        except Exception as e:
+            return f"命令执行失败: {e}"
+
+    def delete_path(path: str) -> str:
+        """删除文件或目录（目录会递归删除）。用于清理临时文件、卸载等。path 为要删除的文件或目录的完整路径。"""
+        import shutil as _shutil
+        p = policy.validate_delete(path)
+        if not p.exists():
+            return f"路径不存在: {path}"
+        try:
+            if p.is_dir():
+                _shutil.rmtree(str(p))
+                return f"已删除目录: {p}"
+            else:
+                p.unlink()
+                return f"已删除文件: {p}"
+        except Exception as e:
+            return f"删除失败: {e}"
     def move_file(src: str, dst: str) -> str:
         """移动/重命名文件或目录。整理文件时使用：dst 可以是目标路径，也可以为目标目录（自动保留文件名）。"""
         s_path, d_path = policy.validate_move(src, dst)
@@ -413,6 +454,8 @@ def build_tools(
     registry.register("list_dir", _wrap("list_dir", list_dir))
     registry.register("open_app", _wrap("open_app", open_app))
     registry.register("move_file", _wrap("move_file", move_file))
+    registry.register("run_command", _wrap("run_command", run_command))
+    registry.register("delete_path", _wrap("delete_path", delete_path))
     return registry
 
 

@@ -67,16 +67,16 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   let content = '';
 
   try {
+    // 用户在设置页填写的 API key 从 SQLite 读取，随请求传给 Agent。
+    const keyRes: any = await tauriInvoke('get_api_key');
+    const userApiKey: string = keyRes?.data || '';
+
     const res = await fetch(`http://127.0.0.1:${config.port}/agent/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-LocalMind-Token': config.token,
       },
-      // 用户在设置页填写的 API key 从 SQLite 读取，随请求传给 Agent（Agent 优先用它）。
-      // 环境变量 LOCALMIND_DEEPSEEK_KEY 仅供开发者本地调试。
-      const keyRes: any = await tauriInvoke('get_api_key');
-      const userApiKey: string = keyRes?.data || '';
       body: JSON.stringify({
         mode: opts.mode,
         model: opts.model,

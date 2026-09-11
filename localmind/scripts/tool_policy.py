@@ -128,6 +128,11 @@ class ToolPolicy:
             raise ToolPolicyError(f"写入路径不在允许范围内: {resolved}")
         return resolved
 
+    def validate_delete(self, path: str | os.PathLike[str]) -> Path:
+        resolved = self.canonicalize_path(path)
+        if not self.is_within_allowed_roots(resolved):
+            raise ToolPolicyError(f"删除路径不在允许范围内: {resolved}")
+        return resolved
     def validate_move(self, source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> tuple[Path, Path]:
         src = self.validate_write(source)
         dst = self.validate_write(destination)
