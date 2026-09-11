@@ -73,14 +73,17 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         'Content-Type': 'application/json',
         'X-LocalMind-Token': config.token,
       },
-      // 注意：不传 API key——DeepSeek key 由 Rust 在启动 Agent 服务时通过环境变量注入，
-      // 前端代码与 HTTP 请求体均不接触明文 key，避免打包后 JS bundle 泄露。
+      // 用户在设置页填写的 API key 从 SQLite 读取，随请求传给 Agent（Agent 优先用它）。
+      // 环境变量 LOCALMIND_DEEPSEEK_KEY 仅供开发者本地调试。
+      const keyRes: any = await tauriInvoke('get_api_key');
+      const userApiKey: string = keyRes?.data || '';
       body: JSON.stringify({
         mode: opts.mode,
         model: opts.model,
         desktop_path: desktopPath,
         messages: opts.messages,
         selected_attachment_paths: opts.selectedAttachmentPaths || [],
+        token: userApiKey,
       }),
       signal: controller.signal,
     });

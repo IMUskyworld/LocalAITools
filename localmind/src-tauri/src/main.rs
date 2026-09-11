@@ -48,6 +48,8 @@ async fn main() {
             chat_api::delete_chat_session,
             chat_api::rename_chat_session,
             chat_api::list_messages,
+            chat_api::get_api_key,
+            chat_api::set_api_key,
             chat_api::turn_begin,
             chat_api::turn_complete,
             chat_api::turn_fail,

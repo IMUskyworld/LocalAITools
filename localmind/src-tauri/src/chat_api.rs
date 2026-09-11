@@ -116,6 +116,30 @@ pub async fn list_messages(
 }
 
 #[tauri::command]
+pub async fn get_api_key(
+    state: State<'_, crate::AppState>,
+) -> Result<AppResponse<String>, String> {
+    let storage = state.storage.read().await;
+    match storage.get_api_key().await {
+        Ok(Some(key)) => Ok(AppResponse::ok(key)),
+        Ok(None) => Ok(AppResponse::ok(String::new())),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
+pub async fn set_api_key(
+    state: State<'_, crate::AppState>,
+    key: String,
+) -> Result<AppResponse<bool>, String> {
+    let storage = state.storage.read().await;
+    match storage.set_api_key(key.clone()).await {
+        Ok(()) => Ok(AppResponse::ok(true)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[tauri::command]
 pub async fn turn_begin(
     session_id: String,
     content: String,

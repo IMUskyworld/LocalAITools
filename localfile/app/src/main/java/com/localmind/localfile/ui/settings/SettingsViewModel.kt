@@ -21,6 +21,8 @@ data class SettingsUiState(
     val conclusionText: String = "",
     val themeMode: String = "system", // "light", "dark", "system"
     val gatewayStatus: ConnectionStatusUI = ConnectionStatusUI.UNKNOWN,
+    val apiKey: String = "",
+    val apiKeySaved: Boolean = false,
     val isChecking: Boolean = true,
     val error: String? = null
 )
@@ -41,6 +43,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val savedTheme = prefsManager.themeMode.first()
             _state.update { it.copy(themeMode = savedTheme) }
+        }
+        viewModelScope.launch {
+            val savedKey = prefsManager.gatewayToken.first()
+            _state.update { it.copy(apiKey = savedKey) }
+            com.localmind.localfile.common.DeepSeekConfig.API_KEY = savedKey
         }
         detectDevice()
     }
@@ -89,6 +96,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 _state.update { it.copy(gatewayStatus = ConnectionStatusUI.ERROR) }
             }
+        }
+    }
+
+    fun setApiKey(key: String) {
+        viewModelScope.launch {
+            prefsManager.setGatewayToken(key)
+            com.localmind.localfile.common.DeepSeekConfig.API_KEY = key
+            _state.update { it.copy(apiKey = key, apiKeySaved = true) }
         }
     }
 

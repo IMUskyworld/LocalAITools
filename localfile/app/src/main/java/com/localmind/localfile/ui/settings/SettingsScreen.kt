@@ -20,6 +20,15 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -97,6 +106,65 @@ fun SettingsScreen(
             )
         }
 
+        // API Key
+        item {
+            var showKey by remember { mutableStateOf(false) }
+            var editingKey by remember { mutableStateOf(state.apiKey) }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("DeepSeek API Key", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "请前往 platform.deepseek.com 获取。Key 仅保存在本地。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = editingKey,
+                            onValueChange = { editingKey = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("API Key") },
+                            placeholder = { Text("sk-...") },
+                            singleLine = true,
+                            visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
+                                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showKey = !showKey }) {
+                                    Icon(
+                                        if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showKey) "隐藏" else "显示"
+                                    )
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { viewModel.setApiKey(editingKey.trim()) },
+                            enabled = editingKey.trim().isNotEmpty()
+                        ) { Text("保存") }
+                    }
+                    if (state.apiKeySaved) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("✓ 已保存", color = Color(0xFF4CAF50), style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (editingKey.isBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("⚠ 未填写 Key，在线模式将无法使用", color = Color(0xFFE74C3C), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         // Gateway status
         item {
             SettingsCard(

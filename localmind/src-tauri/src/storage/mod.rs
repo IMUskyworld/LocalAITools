@@ -358,6 +358,16 @@ impl StorageManager {
 
     // ===== 设置 / 设备身份 =====
 
+
+    pub async fn get_api_key(&self) -> Result<Option<String>, String> {
+        self.with_conn(|conn| get_setting(conn, "deepseek_api_key"))
+            .await
+    }
+
+    pub async fn set_api_key(&self, key: String) -> Result<(), String> {
+        self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &key))
+            .await
+    }
     pub async fn get_device_id(&self) -> Result<String, String> {
         self.with_conn(|conn| {
             if let Some(value) = get_setting(conn, "device_id")? {

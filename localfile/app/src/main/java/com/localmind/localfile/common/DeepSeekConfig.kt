@@ -8,7 +8,9 @@ import com.localmind.localfile.BuildConfig
  * 源码不存明文（公开 GitHub 安全）。未注入时用占位符（APK 功能不可用）。
  */
 object DeepSeekConfig {
-    val API_KEY: String = BuildConfig.DEEPSEEK_API_KEY
+    // 用户在设置页填写的 key；启动时从 DataStore 加载，保存时同步更新。
+    // 不再从 BuildConfig 烘焙（用户自填模式）。
+    var API_KEY: String = ""
     const val BASE_URL = "https://api.deepseek.com/v1"
     const val MODEL = "deepseek-flash"
 

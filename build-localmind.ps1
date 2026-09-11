@@ -12,14 +12,10 @@ $env:Path  = "$CargoBin;$CmakeBin;$MsvcBin;$env:Path"
 if (-not $env:TEMP) { $env:TEMP = (Join-Path $env:USERPROFILE "AppData\Local\Temp") }
 $env:TMP = $env:TEMP
 
-# ---- 关键：注入 DeepSeek key（编译期烘焙进 exe，仓库源码不含明文 key）----
-if ([string]::IsNullOrEmpty($env:LOCALMIND_DEEPSEEK_KEY)) {
-    $env:LOCALMIND_DEEPSEEK_KEY = [Environment]::GetEnvironmentVariable("LOCALMIND_DEEPSEEK_KEY", "User")
-}
-if ([string]::IsNullOrEmpty($env:LOCALMIND_DEEPSEEK_KEY)) {
-    throw "LOCALMIND_DEEPSEEK_KEY 未设置。请先运行：[Environment]::SetEnvironmentVariable('LOCALMIND_DEEPSEEK_KEY','<你的key>','User')"
-}
-Write-Host "LOCALMIND_DEEPSEEK_KEY 已注入（长度 $($env:LOCALMIND_DEEPSEEK_KEY.Length)；仅构建期读取，不进源码）"
+# ---- DeepSeek key：不再编译期烘焙 ----
+# 用户在设置页填写自己的 API key（存 SQLite），打包时无需 key。
+# 保留环境变量检测供开发者本地调试使用。
+Write-Host "构建模式：用户自填 API key（无需编译期注入）"
 
 # ---- 路径（基于脚本位置）----
 $ProjectRoot = Join-Path $PSScriptRoot "localmind"

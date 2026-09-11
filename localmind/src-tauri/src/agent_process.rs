@@ -76,12 +76,11 @@ pub async fn get_agent_config(
 /// 未设置运行时环境变量时，回退到编译期烘焙的默认 key（option_env!("LOCALMIND_DEEPSEEK_KEY")），
 /// 这样打包出的 exe 开箱即用，用户无需手动配置环境变量。
 /// 代码仓库不包含任何真实 key（编译期值由构建环境注入），可安全提交到 GitHub。
+/// DeepSeek API key：只读运行时环境变量，不再烘焙编译期常量。
+/// 用户在设置页填写的 key 存在 SQLite，由前端在请求体中传递给 Agent（body.token）。
+/// 环境变量仅供开发者本地调试使用。
 fn deepseek_api_key() -> String {
-    let runtime = std::env::var("LOCALMIND_DEEPSEEK_KEY").unwrap_or_default();
-    if !runtime.is_empty() {
-        return runtime;
-    }
-    option_env!("LOCALMIND_DEEPSEEK_KEY").unwrap_or("").to_string()
+    std::env::var("LOCALMIND_DEEPSEEK_KEY").unwrap_or_default()
 }
 
 /// 生成随机会话 token（Python 端校验请求头，防止本地任意进程触发写文件/生成文档）
