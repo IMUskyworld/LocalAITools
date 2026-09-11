@@ -35,6 +35,16 @@ Windows 上使用系统 Schannel 的 `curl.exe` 做临时检查时，如果提�
 
 `deploy/Caddyfile` 中的 `default_sni 39.107.53.230` 是必需的。部分客户端在直接连接 IP 时不会发送 TLS SNI；没有它时，Caddy 会在握手阶段返回 `internal error`。
 
+## 客户端信任链（重要）
+
+Relay 使用 Caddy internal CA，操作系统与 Android 都不认识它，因此**客户端的 Relay 请求不能走系统信任链**：
+
+- **LocalMind（Windows）**：账号/设备请求统一由 Rust 命令 `relay_http_request` 发起（`localmind/src-tauri/src/relay_http.rs`），
+  该命令用 rustls 发起请求并从 `localmind/src-tauri/certs/localmind-relay-ca.crt` 编译期嵌入 CA。前端 WebView2 的 `fetch` 不直接访问 Relay。
+- **LocalFile（Android）**：`RelayTls`（`localfile/app/src/main/java/com/localmind/localfile/common/RelayTls.kt`）
+  在系统信任之外加入 `app/src/main/res/raw/localmind_relay_ca.crt`。
+
+CA 轮换时必须同时替换上述两份副本并重新打包两端；详见 `开发计划/ADR-004-ip-only-tls-and-client-ca-pinning.md`。
 ## 后续替换为正式域名
 
 购买并完成 ICP 后：

@@ -27,12 +27,14 @@
 - **Phase 1 评测**：同一模型 `deepseek-chat` 两轮 12 任务 A/B，baseline 18/24，Harness v2 24/24；详细结果见 `开发计划/Phase1-Harness评测报告.md`。
 - **Relay MVP 已完成服务端第一版**：`relay-server/` 提供设备注册、一次性配对码、WSS 转发、命令白名单、`command_id` 幂等、离线队列和状态回传；Rust 单元 + 双端 WSS 集成测试通过。
 - **Relay 已上线（2026-09-11）**：https://39.107.53.230/health 已通过本机与公网 HTTPS 验证；Caddy internal CA 固定信任文件为 `relay-server/certs/localmind-relay-ca.crt`。当前无域名/ICP，属校级演示部署。
+- **Relay TLS 采用客户端内置 CA（ADR-004，2026-09-11）**：Caddy internal CA 使 WebView2/Android 系统信任链无法校验，账号与设备请求因此改为 Rust `relay_http_request`（rustls + 编译期嵌入 CA）与 Android `RelayTls`（OkHttp 组合信任 + raw 资源）发起；CA 轮换需同步替换 `localmind/src-tauri/certs/` 与 `localfile/app/src/main/res/raw/` 两份副本并重新打包。
+- **⚠️ Relay 服务当前不可达（2026-09-11 晚）**：健康检查 `https://39.107.53.230/health` 在本机与全球 4 个探测节点均超时（TCP 80/443 可握手但无响应），SSH 22 端口从公网不可达（安全组仅放行运维 IP），账号层尚未部署到服务器，需先在阿里云控制台恢复实例/放通 SSH。
 - **游客/账号与设备授权方案已冻结（ADR-003）**：游客本地即用；登录同一账号只用于设备归属和设备发现，远程控制必须由 Windows 本机确认后建立设备配对。
-- **账号层已进入实现（2026-09-11）**：Relay 已增加注册/登录/刷新/退出、账号设备登记与移除、控制授权请求（Android → Windows 本机确认）与控制配对撤销；密码 Argon2id、access/refresh token 分离且只存哈希。Windows 账号页与 Android 账号页已接入，LocalFile debug/release 均可编译，release 使用调试签名供演示安装。
+- **账号层已进入实现（2026-09-11）**：Relay 已增加注册/登录/刷新/退出、账号设备登记与移除、控制授权请求（Android → Windows 本机确认）与控制配对撤销；密码 Argon2id、access/refresh token 分离且只存哈希。Windows 账号页与 Android 账号页已接入，LocalFile debug/release 均可编译，release 使用调试签名供演示安装。已推送到 GitHub（main / codex/phase-2-relay = 03b6c2c）。
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
-- **已打包（Phase 1）**：`LocalMind.exe`（免安装）+ `LocalMindSetup.exe`（NSIS）。Setup SHA256 `3B975891851C08967790DCAD968871114B50D6F6304376256C5066B65963E5D1`；Agent SHA256 `58327F347C48092B868F31F140E8E2D4C18945C4718F2D41EAD4D97BCC7698F1`
+- **已打包（Phase 2，2026-09-11 21:35）**：`LocalMind.exe`（免安装，19.5MB，SHA256 `8CAEAA41D617706C31A16457019AA866D88C26E1BD0D8A0B21E41FBFCF6C7C10`）+ `LocalMindSetup.exe`（NSIS，50.9MB，SHA256 `6B2C8E4456A271C7A6A7C02F69AF2629D259BE655FE3BD2F3CACA9DA44EE05B2`）；`LocalFile.apk`（release，14.8MB，SHA256 `0C9E67C636409B4ED13A4AF0E8E6509ADD87315E3D0D347C971AE33B5FF0CFFC`）；Agent 未变更，SHA256 `58327F347C48092B868F31F140E8E2D4C18945C4718F2D41EAD4D97BCC7698F1`
 
 ## 关键决策（ADR 摘要）
 

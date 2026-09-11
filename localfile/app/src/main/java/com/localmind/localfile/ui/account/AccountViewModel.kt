@@ -28,7 +28,7 @@ data class AccountUiState(
 
 class AccountViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = PreferencesManager(application)
-    private val client = AccountClient()
+    private val client = AccountClient(application)
 
     private val _state = MutableStateFlow(AccountUiState())
     val state: StateFlow<AccountUiState> = _state.asStateFlow()

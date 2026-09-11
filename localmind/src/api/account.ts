@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 export interface AccountUser {
   id: string;
   email: string;
@@ -188,25 +190,59 @@ export async function removeAccountDevice(accessToken: string, targetDeviceId: s
   );
 }
 
+// Relay 目前使用 Caddy internal CA 在纯 IP 上提供 TLS，WebView2 的系统信任链无法
+// 通过校验，因此所有 Relay 请求都交给 Rust 侧的 relay_http_request 命令发起，
+// 由 Rust 显式信任内置 CA。相关约束与校验见 src-tauri/src/relay_http.rs。
+interface RelayHttpResponse {
+  status: number;
+  body: string;
+}
+
 async function relayRequest<T>(
   path: string,
   init: RequestInit = {},
   accessToken?: string,
 ): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set('accept', 'application/json');
-  if (init.body) headers.set('content-type', 'application/json');
-  if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
+  const headers: Record<string, string> = {};
+  new Headers(init.headers).forEach((value, key) => {
+    headers[key] = value;
+  });
 
-  const response = await fetch(`${getRelayBaseUrl()}${path}`, { ...init, headers });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    const code = body?.error?.code || String(response.status);
-    const message = body?.error?.message || `Relay request failed (${response.status})`;
+  let response: RelayHttpResponse;
+  try {
+    response = await invoke<RelayHttpResponse>('relay_http_request', {
+      baseUrl: getRelayBaseUrl(),
+      method: (init.method || 'GET').toUpperCase(),
+      path,
+      body: typeof init.body === 'string' ? init.body : null,
+      accessToken: accessToken ?? null,
+      headers,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new RelayApiError(
+      `无法连接 Relay 服务（${getRelayBaseUrl()}）：${detail}`,
+      'relay_unreachable',
+      0,
+    );
+  }
+
+  const payload = response.body ? parseJsonBody(response.body) : null;
+  if (response.status < 200 || response.status >= 300) {
+    const code = payload?.error?.code || String(response.status);
+    const message = payload?.error?.message || `Relay request failed (${response.status})`;
     throw new RelayApiError(message, code, response.status);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  if (response.status === 204 || !response.body) return undefined as T;
+  return payload as T;
+}
+
+function parseJsonBody(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function readJson<T>(key: string): T | null {

@@ -1,14 +1,13 @@
 package com.localmind.localfile.common
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 data class RelayDeviceRegistration(
     val deviceId: String,
@@ -47,6 +46,7 @@ class AccountApiException(
 ) : Exception(message, cause)
 
 class AccountClient(
+    context: Context,
     private val baseUrl: String = DEFAULT_RELAY_URL
 ) {
     companion object {
@@ -54,11 +54,8 @@ class AccountClient(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(20, TimeUnit.SECONDS)
-        .build()
+    // Relay 使用 Caddy internal CA（纯 IP 部署，暂无域名/ICP），必须显式信任内置 CA。
+    private val client = RelayTls.relayHttpClient(context)
 
     suspend fun registerDevice(
         deviceName: String,

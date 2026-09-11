@@ -7,6 +7,7 @@ mod common;
 mod files;
 mod inference;
 mod model;
+mod relay_http;
 mod storage;
 mod tools;
 
@@ -71,6 +72,7 @@ async fn main() {
             tools::get_common_paths,
             tools::check_ollama,
             agent_process::get_agent_config,
+            relay_http::relay_http_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

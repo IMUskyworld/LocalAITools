@@ -15,7 +15,7 @@ import {
   removeAccountDevice,
   storeAuth,
 } from '@/api/account';
-import { getErrorInfo } from '@/utils/error-codes';
+import { formatErrorMessage } from '@/utils/error-codes';
 
 type AccountStatus = 'guest' | 'loading' | 'authenticated';
 
@@ -67,6 +67,18 @@ export const useAccountStore = create<AccountState>((set, get) => ({
       const devices = await listAccountDevices(session.tokens.access_token);
       set({ status: 'authenticated', user, devices, initialized: true, error: null });
     } catch (error) {
+      // Relay 暂时不可达（relay_unreachable）不代表账号失效：保留本地会话，
+      // 只提示错误，否则服务器抖动一次就会把用户静默登出。
+      if (error instanceof RelayApiError && error.code === 'relay_unreachable') {
+        set({
+          status: 'guest',
+          user: null,
+          devices: [],
+          initialized: true,
+          error: messageFor(error),
+        });
+        return;
+      }
       clearStoredAuth();
       set({
         status: 'guest',
@@ -167,8 +179,9 @@ export const useAccountStore = create<AccountState>((set, get) => ({
 
 function messageFor(error: unknown): string {
   if (error instanceof RelayApiError) {
-    const info = getErrorInfo(error.code);
-    return info.localMessage || error.message;
+    // 已知错误码走共享错误码表；未登记的（如 relay_unreachable）回落到真实原因，
+    // 避免把「未知错误」这种占位文案丢给用户而丢掉可诊断信息。
+    return formatErrorMessage(error.code, error.message);
   }
   if (error instanceof Error) return error.message;
   return '账号服务暂时不可用';
