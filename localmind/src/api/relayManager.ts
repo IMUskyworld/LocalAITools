@@ -53,6 +53,16 @@ export async function startRelayListener(): Promise<void> {
     console.warn('[Relay] WSS connect failed:', e);
   }
 
+  // 监听 WSS 重连状态
+  listen<boolean>('relay-wss-connected', (event) => {
+    const connected = event.payload;
+    if (connected) {
+      console.log('[Relay] WSS reconnected, pending messages will be flushed automatically');
+    } else {
+      console.log('[Relay] WSS disconnected, will auto-reconnect');
+    }
+  });
+
   // 监听远程命令事件
   stopListening = await listen<RelayCommandEnvelope>('relay-command', async (event) => {
     const env = event.payload;

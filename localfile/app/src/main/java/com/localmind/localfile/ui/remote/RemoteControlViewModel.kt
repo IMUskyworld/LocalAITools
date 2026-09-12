@@ -14,6 +14,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+data class CommandHistoryEntry(
+    val command: String,
+    val status: String,
+    val result: String
+)
+
 data class RemoteControlUiState(
     val devices: List<RelayAccountDevice> = emptyList(),
     val selectedDeviceId: String? = null,
@@ -22,6 +28,7 @@ data class RemoteControlUiState(
     val statusMessage: String = "",
     val statusType: String = "", // "running", "done", "failed"
     val resultText: String = "",
+    val history: List<CommandHistoryEntry> = emptyList(),
     val error: String? = null
 )
 
