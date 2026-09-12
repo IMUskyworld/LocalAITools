@@ -26,6 +26,8 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub model_label: String,
+    /// 本轮消耗的 token 总数（来自 API 的 usage，精确值；旧数据可能为空）
+    pub token_count: Option<i64>,
     pub created_at: i64,
 }
 

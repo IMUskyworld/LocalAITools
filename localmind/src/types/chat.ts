@@ -20,6 +20,16 @@ export interface ChatMessage {
   isStreaming?: boolean;
   tokensPerSecond?: number;
   latencyMs?: number;
+  /** 本轮消耗的 token 明细（由 DeepSeek API 的 usage 字段返回，精确值） */
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    requests: number;
+    tool_calls: number;
+  };
 }
 
 export interface StreamEvent {

@@ -3632,3 +3632,14 @@ input, textarea, select {
 @media (max-width: 900px) {
   .account-guest-layout { grid-template-columns: 1fr; }
 }
+
+.bubble-tokens {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #888);
+  cursor: help;
+  border-bottom: 1px dotted currentColor;
+}
+.bubble-tokens .token-split {
+  opacity: 0.75;
+  margin-left: 2px;
+}

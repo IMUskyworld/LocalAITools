@@ -132,7 +132,23 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           <span className="bubble-time">{formatDate(message.timestamp)}</span>
           {message.isStreaming && <span className="streaming-indicator">正在生成...</span>}
           {message.tokensPerSecond && <span className="bubble-speed">{message.tokensPerSecond} tok/s</span>}
-          {message.latencyMs && <span className="bubble-latency">{message.latencyMs}ms</span>}
+          {message.latencyMs && <span className="bubble-latency">{(message.latencyMs / 1000).toFixed(1)}s</span>}
+          {message.usage && message.usage.total_tokens > 0 && (
+            <span
+              className="bubble-tokens"
+              title={
+                `输入 ${message.usage.input_tokens} tok · 输出 ${message.usage.output_tokens} tok` +
+                (message.usage.cache_read_tokens > 0 ? ` · 缓存命中 ${message.usage.cache_read_tokens} tok` : '') +
+                (message.usage.requests > 1 ? ` · ${message.usage.requests} 次请求` : '') +
+                (message.usage.tool_calls > 0 ? ` · ${message.usage.tool_calls} 次工具调用` : '')
+              }
+            >
+              Σ {message.usage.total_tokens.toLocaleString()} tok
+              <span className="token-split">
+                （↑{message.usage.input_tokens.toLocaleString()} ↓{message.usage.output_tokens.toLocaleString()}）
+              </span>
+            </span>
+          )}
         </div>
       </div>
       {isUser && (

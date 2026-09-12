@@ -122,7 +122,12 @@ export function useStreamChat(): UseStreamChatReturn {
       // 将工具调用嵌入消息内容，使跨轮对话保留完整上下文
       const contentWithTools = embedToolLogs(result.content, result.toolLogs);
 
-      const saved = await completeTurn(turnId, contentWithTools, activeModelLabel);
+      const saved = await completeTurn(
+        turnId,
+        contentWithTools,
+        activeModelLabel,
+        result.usage?.total_tokens ?? undefined,
+      );
 
       // AI 辅助摘要生成（异步，不阻塞 UI）
       generateSummary(content, result.toolLogs).then((summary) => {
@@ -138,6 +143,12 @@ export function useStreamChat(): UseStreamChatReturn {
         timestamp: saved.timestamp,
         modelName: saved.modelName,
         isStreaming: false,
+        usage: result.usage ?? undefined,
+        latencyMs: result.elapsedMs || undefined,
+        tokensPerSecond:
+          result.usage && result.elapsedMs
+            ? Math.round((result.usage.output_tokens / (result.elapsedMs / 1000)) * 10) / 10
+            : undefined,
       });
     } catch (e: unknown) {
       const aborted = controller.signal.aborted;

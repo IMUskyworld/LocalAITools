@@ -169,7 +169,7 @@ impl StorageManager {
         self.with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, session_id, role, content, model_label, created_at
+                    "SELECT id, session_id, role, content, model_label, token_count, created_at
                      FROM messages
                      WHERE session_id = ?1
                      ORDER BY created_at ASC, rowid ASC",
@@ -183,7 +183,8 @@ impl StorageManager {
                         role: row.get(2)?,
                         content: row.get(3)?,
                         model_label: row.get(4)?,
-                        created_at: row.get(5)?,
+                        token_count: row.get(5)?,
+                        created_at: row.get(6)?,
                     })
                 })
                 .map_err(db_error)?;
@@ -265,6 +266,7 @@ impl StorageManager {
                     role: "user".to_string(),
                     content: user_content,
                     model_label,
+                    token_count: None,
                     created_at: now,
                 },
             })
@@ -277,6 +279,7 @@ impl StorageManager {
         turn_id: &str,
         assistant_content: &str,
         model_label: &str,
+        token_count: Option<i64>,
     ) -> Result<ChatMessage, String> {
         let turn_id = turn_id.to_string();
         let assistant_content = assistant_content.to_string();
@@ -301,9 +304,9 @@ impl StorageManager {
             let now = chrono::Utc::now().timestamp_millis();
             let message_id = uuid::Uuid::new_v4().to_string();
             tx.execute(
-                "INSERT INTO messages (id, session_id, turn_id, role, content, model_label, created_at)
-                 VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
-                params![message_id, session_id, turn_id, assistant_content, model_label, now],
+                "INSERT INTO messages (id, session_id, turn_id, role, content, model_label, token_count, created_at)
+                 VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6, ?7)",
+                params![message_id, session_id, turn_id, assistant_content, model_label, token_count, now],
             )
             .map_err(db_error)?;
             tx.execute(
@@ -325,6 +328,7 @@ impl StorageManager {
                 role: "assistant".to_string(),
                 content: assistant_content,
                 model_label,
+                token_count,
                 created_at: now,
             })
         })
@@ -649,7 +653,7 @@ mod tests {
         let session = manager.create_session("测试".to_string()).await.unwrap();
         let start = manager.begin_turn(&session.id, "你好", "test-model").await.unwrap();
         manager
-            .complete_turn(&start.turn.id, "你好，我在这里", "test-model")
+            .complete_turn(&start.turn.id, "你好，我在这里", "test-model", None)
             .await
             .unwrap();
         drop(manager);
@@ -682,7 +686,7 @@ mod tests {
         let (_dir, manager) = manager();
         let session = manager.create_session("删除".to_string()).await.unwrap();
         let start = manager.begin_turn(&session.id, "内容", "m").await.unwrap();
-        manager.complete_turn(&start.turn.id, "回复", "m").await.unwrap();
+        manager.complete_turn(&start.turn.id, "回复", "m", None).await.unwrap();
         manager.delete_session(&session.id).await.unwrap();
 
         let conn = open_connection(manager.db_path()).unwrap();

@@ -1014,6 +1014,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             content_parts = []
             tool_calls = {}
+            started_at = time.time()
             usage_limits = UsageLimits(request_limit=8, tool_calls_limit=12) if v2 else None
             async with agent.run_stream_events(
                 prompt,
@@ -1107,7 +1108,24 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             content = strip_tool_call_text(content)
             trace.finish("completed", content=content, usage=usage, tool_logs=tool_logs)
-            self._write_event({"type": "done", "content": content})
+            elapsed_ms = int((time.time() - started_at) * 1000)
+            usage_payload = None
+            if usage is not None:
+                usage_payload = {
+                    "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+                    "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+                    "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                    "cache_read_tokens": int(getattr(usage, "cache_read_tokens", 0) or 0),
+                    "cache_write_tokens": int(getattr(usage, "cache_write_tokens", 0) or 0),
+                    "requests": int(getattr(usage, "requests", 0) or 0),
+                    "tool_calls": int(getattr(usage, "tool_calls", 0) or 0),
+                }
+            self._write_event({
+                "type": "done",
+                "content": content,
+                "usage": usage_payload,
+                "elapsed_ms": elapsed_ms,
+            })
 
         except (BrokenPipeError, ConnectionResetError, OSError):
             trace.finish("cancelled", error="client disconnected", tool_logs=tool_logs)

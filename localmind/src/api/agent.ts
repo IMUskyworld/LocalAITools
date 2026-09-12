@@ -37,9 +37,21 @@ export interface AgentRunOptions {
   onConfirm?: (request: ConfirmRequest) => Promise<boolean>;
 }
 
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  requests: number;
+  tool_calls: number;
+}
+
 export interface AgentRunResult {
   content: string;
   toolLogs: ToolLog[];
+  usage?: TokenUsage | null;
+  elapsedMs?: number;
 }
 
 // ========== Python Agent 服务连接 ==========
@@ -72,6 +84,8 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
   const toolLogs: ToolLog[] = [];
   let content = '';
+  let usage: TokenUsage | null = null;
+  let elapsedMs = 0;
 
   try {
     // 用户在设置页填写的 API key 从 SQLite 读取，随请求传给 Agent。
@@ -139,6 +153,8 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
               break;
             case 'done':
               content = obj.content ?? content;
+              if (obj.usage) usage = obj.usage as TokenUsage;
+              if (typeof obj.elapsed_ms === 'number') elapsedMs = obj.elapsed_ms;
               break;
             case 'confirm': {
               const confirmReq: ConfirmRequest = { id: obj.id, tool: obj.tool, args: obj.args };
@@ -163,5 +179,5 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
     opts.signal?.removeEventListener('abort', onAbort);
   }
 
-  return { content, toolLogs };
+  return { content, toolLogs, usage, elapsedMs };
 }

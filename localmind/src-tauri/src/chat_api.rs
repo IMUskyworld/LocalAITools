@@ -21,6 +21,7 @@ pub struct ChatMessageDto {
     pub role: String,
     pub content: String,
     pub model_label: String,
+    pub token_count: Option<i64>,
     pub created_at: i64,
 }
 
@@ -51,6 +52,7 @@ fn dto_message(m: &ChatMessage) -> ChatMessageDto {
         role: m.role.clone(),
         content: m.content.clone(),
         model_label: m.model_label.clone(),
+        token_count: m.token_count,
         created_at: m.created_at,
     }
 }
@@ -273,11 +275,12 @@ pub async fn turn_complete(
     turn_id: String,
     content: String,
     model_label: Option<String>,
+    token_count: Option<i64>,
     state: State<'_, crate::AppState>,
 ) -> Result<AppResponse<ChatMessageDto>, String> {
     let storage = state.storage.read().await;
     let label = model_label.unwrap_or_else(|| "DeepSeek V4 Flash".to_string());
-    match storage.complete_turn(&turn_id, &content, &label).await {
+    match storage.complete_turn(&turn_id, &content, &label, token_count).await {
         Ok(message) => Ok(AppResponse::ok(dto_message(&message))),
         Err(e) => Ok(AppResponse::err("TURN_COMPLETE_FAILED", &e)),
     }

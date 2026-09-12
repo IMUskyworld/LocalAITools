@@ -47,7 +47,7 @@ export interface ChatStoreActions {
   getCurrentSession: () => ChatSession | undefined;
   getCurrentMessages: () => ChatMessage[];
   beginTurn: (sessionId: string, content: string, modelLabel?: string) => Promise<TurnStartResult>;
-  completeTurn: (turnId: string, content: string, modelLabel?: string) => Promise<ChatMessage>;
+  completeTurn: (turnId: string, content: string, modelLabel?: string, tokenCount?: number) => Promise<ChatMessage>;
   failTurn: (
     turnId: string,
     status: 'failed' | 'cancelled' | 'interrupted',
@@ -69,6 +69,9 @@ export interface ChatStoreActions {
 type ChatStore = ChatStoreState & ChatStoreActions;
 
 function messageFromDto(data: any): ChatMessage {
+  // 从库里读回时只有 token 总数（不含输入/输出拆分），
+  // 构造一个只带 total_tokens 的 usage 让 UI 能继续显示总量。
+  const totalTokens = typeof data.token_count === 'number' ? data.token_count : 0;
   return {
     id: data.id,
     sessionId: data.session_id,
@@ -76,6 +79,17 @@ function messageFromDto(data: any): ChatMessage {
     content: data.content,
     timestamp: data.created_at,
     modelName: data.model_label,
+    usage: totalTokens > 0
+      ? {
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: totalTokens,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          requests: 0,
+          tool_calls: 0,
+        }
+      : undefined,
   };
 }
 
@@ -285,12 +299,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  completeTurn: async (turnId: string, content: string, label?: string) => {
+  completeTurn: async (turnId: string, content: string, label?: string, tokenCount?: number) => {
     try {
       const r = await tauriInvoke<any>('turn_complete', {
         turnId,
         content,
         modelLabel: label || modelLabel(get().mode, get().selectedOllamaModel),
+        tokenCount: tokenCount ?? null,
       });
       if (!r.data) throw new Error('完成 Turn 失败：后端没有返回消息数据');
       return messageFromDto(r.data);
