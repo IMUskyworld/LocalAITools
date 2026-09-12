@@ -1,5 +1,6 @@
 // Relay WSS 管理器 — 连接 Relay、接收远程命令、执行并回传状态
 import { listen } from '@tauri-apps/api/event';
+import { sendNotification, requestPermission } from '@tauri-apps/plugin-notification';
 import { tauriInvoke } from '@/api/ipc';
 import { runAgent, type AgentMessage } from '@/api/agent';
 import { useChatStore } from '@/stores/chatStore';
@@ -65,6 +66,12 @@ export async function startRelayListener(): Promise<void> {
     const intentText = env.intent_text || '(empty)';
     const commandId = env.command_id || env.id;
     const fromDeviceId = env.from_device_id;
+
+    // 发送 Windows 系统通知
+    try {
+      await requestPermission();
+      sendNotification({ title: 'LocalMind 远程命令', body: intentText.substring(0, 200) });
+    } catch {}
 
     // 在当前 session 显示远程命令为系统消息
     const store = useChatStore.getState();
