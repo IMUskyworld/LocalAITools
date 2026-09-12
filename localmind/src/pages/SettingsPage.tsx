@@ -1,7 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { tauriInvoke } from '@/api/ipc';
 
 type ThemeMode = 'light' | 'dark' | 'system';
+
+
+interface MemoryEntry { id: string; category: string; content: string; confidence: number; }
+
+function MemorySection() {
+  const [memories, setMemories] = useState<MemoryEntry[]>([]);
+  const [keyword, setKeyword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const fn = keyword.trim() ? "search_memories" : "get_memories";
+      const args = keyword.trim() ? { keyword: keyword.trim(), limit: 50 } : { limit: 50 };
+      const res: any = await tauriInvoke(fn, args);
+      setMemories(res?.data || []);
+    } catch { setMemories([]); }
+    setLoading(false);
+  }, [keyword]);
+  useEffect(() => { load(); }, []);
+  const handleDelete = async (id: string) => {
+    await tauriInvoke("delete_memory", { memoryId: id });
+    setMemories((prev) => prev.filter((m) => m.id !== id));
+  };
+  return (
+    <section className="settings-card">
+      <h2>记忆管理</h2>
+      <p className="settings-hint">Agent 的长期记忆条目，可搜索和删除。</p>
+      <div className="api-key-input-row" style={{ marginBottom: 12 }}>
+        <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索关键词..." className="api-key-input" />
+        <button className="btn-primary" onClick={load} disabled={loading}>{loading ? "..." : "搜索"}</button>
+      </div>
+      {memories.length === 0 ? (
+        <p className="settings-hint">暂无记忆条目。</p>
+      ) : (
+        <div style={{ maxHeight: 300, overflowY: "auto" }}>
+          {memories.map((m) => (
+            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "start", padding: "8px 0", borderBottom: "1px solid var(--border, #eee)" }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--accent, #6c5ce7)", fontWeight: 600, marginRight: 8 }}>[{m.category}]</span>
+                <span style={{ fontSize: "0.85rem" }}>{m.content}</span>
+              </div>
+              <button onClick={() => handleDelete(m.id)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.8rem", marginLeft: 8 }}>删除</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function SettingsPage() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -115,6 +164,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Memory Management */}
+      <MemorySection />
 
       {/* About */}
       <section className="settings-card">
