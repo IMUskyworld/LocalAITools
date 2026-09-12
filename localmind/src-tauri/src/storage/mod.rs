@@ -360,8 +360,22 @@ impl StorageManager {
 
 
     pub async fn get_api_key(&self) -> Result<Option<String>, String> {
-        self.with_conn(|conn| get_setting(conn, "deepseek_api_key"))
-            .await
+        self.with_conn(|conn| {
+            let stored = get_setting(conn, "deepseek_api_key")?;
+            match stored {
+                Some(val) => {
+                    let device_id = get_setting(conn, "device_id")?.unwrap_or_default();
+                    if val.starts_with("ENC:") {
+                        let decrypted = crate::crypto_util::decrypt_string(&val[4..], &device_id)?;
+                        Ok(Some(decrypted))
+                    } else {
+                        Ok(Some(val))
+                    }
+                }
+                None => Ok(None),
+            }
+        })
+        .await
     }
 
     pub async fn set_api_key(&self, key: String) -> Result<(), String> {

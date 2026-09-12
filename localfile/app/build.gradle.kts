@@ -94,6 +94,9 @@ dependencies {
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // Encrypted storage for sensitive data
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // Network
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")

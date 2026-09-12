@@ -8,6 +8,7 @@ mod files;
 mod inference;
 mod model;
 mod relay_http;
+mod crypto_util;
 mod relay_wss;
 mod storage;
 mod tools;

@@ -23,6 +23,8 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
 rustls = "0.22"
 rustls-pemfile = "1"
 urlencoding = "2"
+aes-gcm = "0.10"
+base64 = "0.22"
 http = "1"
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
