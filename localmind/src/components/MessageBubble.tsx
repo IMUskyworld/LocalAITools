@@ -9,6 +9,7 @@ interface MessageBubbleProps {
 /** 解析工具调用标记，返回结构化数据 */
 function parseToolBlocks(content: string): Array<{ type: 'text'; value: string } | { type: 'tool'; name: string; args: string; result: string; failed: boolean }> {
   const blocks: Array<{ type: 'text'; value: string } | { type: 'tool'; name: string; args: string; result: string; failed: boolean }> = [];
+  content = content.replace('[最终回复]', '');
   const regex = /\[调用工具:(\S+?)\]\s*(.*?)\n\[工具结果:\1\]\s*(.*?)(?=\n\[调用工具:|\n*$)/gs;
   let lastIndex = 0;
   let match: RegExpExecArray | null;

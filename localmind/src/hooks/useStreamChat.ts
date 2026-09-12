@@ -240,13 +240,17 @@ async function generateSummary(content: string, toolLogs: {name:string;output:st
 
 // ========== 工具调用嵌入（跨轮记忆修复） ==========
 
+const FINAL_REPLY_MARKER = '[最终回复]';
+
 function embedToolLogs(content: string, toolLogs: { name: string; args: string; output: string; success: boolean }[]): string {
   if (!toolLogs || toolLogs.length === 0) return content;
   const blocks = toolLogs.map((log) => {
     const argsStr = typeof log.args === 'string' ? log.args : JSON.stringify(log.args);
     return `[调用工具:${log.name}] ${argsStr}\n[工具结果:${log.name}] ${log.success ? '' : '(失败) '}${log.output}`;
   });
-  return blocks.join('\n') + '\n' + content;
+  // 用显式分隔符标记「工具块结束、最终回复开始」，
+  // 否则 Python 侧无法区分最后一个工具的输出和助手正文。
+  return blocks.join('\n') + '\n' + FINAL_REPLY_MARKER + '\n' + content;
 }
 // ========== 附件注入 ==========
 

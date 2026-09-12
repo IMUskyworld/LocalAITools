@@ -32,7 +32,7 @@
 - **游客/账号与设备授权方案已冻结（ADR-003）**：游客本地即用；登录同一账号只用于设备归属和设备发现，远程控制必须由 Windows 本机确认后建立设备配对。
 - **账号层已进入实现（2026-09-11）**：Relay 已增加注册/登录/刷新/退出、账号设备登记与移除、控制授权请求（Android → Windows 本机确认）与控制配对撤销；密码 Argon2id、access/refresh token 分离且只存哈希。Windows 账号页与 Android 账号页已接入，LocalFile debug/release 均可编译，release 使用调试签名供演示安装。已推送到 GitHub（main / codex/phase-2-relay = 03b6c2c）。
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
-- **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
+- **Agent 工具 9 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc / run_command / delete_path
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
 - **已打包（v0.3.0 Phase 4，2026-09-12 04:00，含确认UI+审计日志+记忆管理+工具卡片+AI摘要+远程控制）**：`LocalMind.exe`（19.9MB，SHA256 `0C8DFC7046F96D00CBC0278A26D628440957BB4C23DAA544993866D21308C6B3`）+ `LocalMindSetup.exe`（50.9MB）+ `LocalFile.apk`（14.9MB）；APK 不含任何内置 key。
 

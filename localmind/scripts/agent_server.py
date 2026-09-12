@@ -659,11 +659,113 @@ def strip_tool_call_text(text):
 
 # ========== 消息转换 ==========
 
+_FINAL_REPLY_MARKER = "[最终回复]"
+
+_TOOL_BLOCK_RE = re.compile(
+    r"\[调用工具:(?P<name>[^\]]+)\]\s*(?P<args>.*?)\n"
+    r"\[工具结果:(?P=name)\]\s*(?P<result>.*?)"
+    r"(?=\n\[调用工具:|\n" + re.escape(_FINAL_REPLY_MARKER) + r"|\Z)",
+    re.DOTALL,
+)
+
+
+def parse_tool_blocks(content: str):
+    """解析前端嵌入的工具调用标记，返回 (tool_calls, trailing_text)。
+
+    前端 `embedToolLogs()` 写入的格式：
+        [调用工具:write_file] {"path":"a.txt"}
+        [工具结果:write_file] 已写入文件: a.txt
+        [调用工具:read_file] {...}
+        [工具结果:read_file] ...
+        <最终的 assistant 文本>
+
+    返回 [] 表示这段内容里没有工具调用，调用方按普通文本处理。
+    """
+    content = content.replace(_FINAL_REPLY_MARKER, "").strip() if _FINAL_REPLY_MARKER in content and not content.lstrip().startswith("[调用工具:") else content
+    matches = list(_TOOL_BLOCK_RE.finditer(content))
+    if not matches:
+        return [], content
+
+    calls = []
+    for idx, m in enumerate(matches):
+        name = m.group("name").strip()
+        raw_args = (m.group("args") or "").strip()
+        raw_result = (m.group("result") or "").strip()
+
+        try:
+            args = json.loads(raw_args) if raw_args else {}
+            if not isinstance(args, dict):
+                args = {"value": args}
+        except (ValueError, TypeError):
+            args = {"raw": raw_args}
+
+        failed = raw_result.startswith("(失败)")
+        if failed:
+            raw_result = raw_result[len("(失败)"):].strip()
+
+        calls.append({
+            "tool_call_id": f"hist-{idx}-{abs(hash(name)) % 100000}",
+            "tool_name": name,
+            "args": args,
+            "result": raw_result,
+            "failed": failed,
+        })
+
+    # 优先用显式分隔符切出助手正文，避免把最后一段工具输出和正文混在一起
+    if _FINAL_REPLY_MARKER in content:
+        trailing = content.split(_FINAL_REPLY_MARKER, 1)[1].strip()
+    else:
+        trailing = content[matches[-1].end():].strip()
+    return calls, trailing
+
+
+def _assistant_history_entries(content: str):
+    """把一条 assistant 消息转成 Pydantic AI 的历史条目。
+
+    - 含工具调用：重建 ToolCallPart + ToolReturnPart（保留跨轮工具上下文）
+    - 不含工具调用：退化成 TextPart
+    解析失败时也安全退化为 TextPart。
+    """
+    try:
+        calls, trailing = parse_tool_blocks(content)
+    except Exception:
+        return [ModelResponse(parts=[TextPart(content=content)])]
+
+    if not calls:
+        return [ModelResponse(parts=[TextPart(content=content)])]
+
+    call_parts = []
+    return_parts = []
+    for call in calls:
+        call_parts.append(
+            ToolCallPart(
+                tool_name=call["tool_name"],
+                args=call["args"],
+                tool_call_id=call["tool_call_id"],
+            )
+        )
+        return_parts.append(
+            ToolReturnPart(
+                tool_name=call["tool_name"],
+                content=call["result"],
+                tool_call_id=call["tool_call_id"],
+                outcome="failed" if call["failed"] else "success",
+            )
+        )
+
+    entries = [ModelResponse(parts=call_parts), ModelRequest(parts=return_parts)]
+    if trailing:
+        entries.append(ModelResponse(parts=[TextPart(content=trailing)]))
+    return entries
+
+
 def split_messages(messages):
     """前端 AgentMessage[] → (prompt, message_history)。
 
     - 最后一条 user 消息作为本次 prompt（不进 history）
     - 其余按 role 转成 Pydantic AI 的 ModelRequest/ModelResponse
+    - assistant 消息里的工具调用标记会重建成 ToolCallPart / ToolReturnPart，
+      让模型在后续轮次能看到「之前调用过哪些工具、结果是什么」
     """
     history = []
     prompt = ""
@@ -681,7 +783,7 @@ def split_messages(messages):
         elif role == "user":
             history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
         elif role == "assistant":
-            history.append(ModelResponse(parts=[TextPart(content=content)]))
+            history.extend(_assistant_history_entries(content))
     if not prompt:
         prompt = last_user
     return prompt, history

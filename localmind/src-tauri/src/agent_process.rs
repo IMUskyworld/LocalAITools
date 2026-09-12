@@ -71,14 +71,13 @@ pub async fn get_agent_config(
 
 // ========== 启动 ==========
 
-/// DeepSeek API key（在线模式）。优先读运行时环境变量 LOCALMIND_DEEPSEEK_KEY，
-/// 通过子进程环境变量传给 Python Agent 服务，绝不进入前端 JS bundle 或 HTTP 请求体。
-/// 未设置运行时环境变量时，回退到编译期烘焙的默认 key（option_env!("LOCALMIND_DEEPSEEK_KEY")），
-/// 这样打包出的 exe 开箱即用，用户无需手动配置环境变量。
-/// 代码仓库不包含任何真实 key（编译期值由构建环境注入），可安全提交到 GitHub。
-/// DeepSeek API key：只读运行时环境变量，不再烘焙编译期常量。
-/// 用户在设置页填写的 key 存在 SQLite，由前端在请求体中传递给 Agent（body.token）。
-/// 环境变量仅供开发者本地调试使用。
+/// DeepSeek API key —— 仅作开发者本地调试的兜底通道。
+///
+/// 正式链路：用户在设置页填写 key -> 存到 %APPDATA%\LocalMind\auth.json ->
+/// 前端 `runAgent` 读出来后放进请求体 `body.token` -> Python agent 使用它。
+/// 本函数只读运行时环境变量 LOCALMIND_DEEPSEEK_KEY，不再有编译期烘焙值；
+/// 且 Python 侧优先级为 body.token > 环境变量，所以留一个过期环境变量也不会覆盖
+/// 用户在设置页填写的 key。
 fn deepseek_api_key() -> String {
     std::env::var("LOCALMIND_DEEPSEEK_KEY").unwrap_or_default()
 }

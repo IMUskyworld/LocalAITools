@@ -102,6 +102,21 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestConnection = async () => {
+    if (!apiKey.trim()) return;
+    setTestStatus('testing');
+    try {
+      const res = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey.trim() },
+        body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
+        signal: AbortSignal.timeout(10000),
+      });
+      setTestStatus(res.ok ? 'ok' : 'fail');
+    } catch { setTestStatus('fail'); }
+    setTimeout(() => setTestStatus('idle'), 5000);
+  };
+
   return (
     <div className="settings-page">
       <h1 className="page-title">设置</h1>
@@ -136,6 +151,14 @@ export default function SettingsPage() {
             disabled={keyStatus === 'saving' || apiKey.trim() === ''}
           >
             {keyStatus === 'saving' ? '保存中...' : keyStatus === 'saved' ? '✓ 已保存' : keyStatus === 'error' ? '保存失败' : '保存'}
+          </button>
+          <button
+            className="btn-primary"
+            style={{ background: testStatus === 'fail' ? '#e74c3c' : '#4caf50', marginLeft: 8 }}
+            onClick={handleTestConnection}
+            disabled={testStatus === 'testing' || !apiKey.trim()}
+          >
+            {testStatus === 'testing' ? '测试中...' : testStatus === 'ok' ? '✓ 连通' : testStatus === 'fail' ? '✗ 失败' : '测试联通'}
           </button>
         </div>
         {!apiKey.trim() && (
