@@ -57,3 +57,24 @@ data class FileRecordEntity(
     val errorCode: String = "",
     val processedAt: Long = System.currentTimeMillis()
 )
+
+
+/**
+ * 审计日志：记录 Agent 的每一次工具调用（对齐 Windows 端的 audit_log 表）。
+ * 只增不改，用户可在"审计日志"页查看。
+ */
+@Entity(tableName = "audit_log")
+data class AuditLogEntity(
+    @PrimaryKey val id: String,
+    val sessionId: String = "",
+    /** 工具名或动作名，如 generate_doc */
+    val action: String,
+    /** 参数摘要（截断） */
+    val target: String = "",
+    val riskLevel: String = "L2",
+    /** success / failed */
+    val result: String,
+    /** 输出或错误详情（截断） */
+    val detail: String = "",
+    val createdAt: Long = System.currentTimeMillis()
+)

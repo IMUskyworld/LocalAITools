@@ -22,6 +22,9 @@ import java.io.File
  * 聊天引擎：只走在线（DeepSeek），支持 function calling Agent 循环。
  * 离线模式已砍掉（本阶段不做本地推理）。
  */
+/** 历史消息的字符预算（≈30K tokens，为 system prompt 和回复留余量） */
+private const val HISTORY_CHAR_BUDGET = 60_000
+
 private const val SYSTEM_PROMPT =
     "你是 LocalFile，一个运行在手机上的 AI 助手。你可以读取用户上传的文件内容，并回答问题。\n" +
     "当用户要求「生成 / 创建 / 制作一个 Word 文档、报告、文档」时，你必须调用 generate_doc 工具，" +
@@ -47,6 +50,7 @@ private val TASK_KEYWORDS = Regex("生成|创建|制作|写|保存|总结|分析
 class ChatEngine(private val appContext: Context) {
 
     private val gatewayClient = GatewayClient()
+    private val auditRepo = AuditRepository(appContext)
     private val docxGenerator = DocxGenerator(appContext)
     private val pptxGenerator = PptxGenerator(appContext)
     private val xlsxGenerator = XlsxGenerator(appContext)
@@ -59,13 +63,21 @@ class ChatEngine(private val appContext: Context) {
      */
     suspend fun sendMessage(
         messages: List<ChatMessage>,
-        newMessage: String
+        newMessage: String,
+        sessionId: String = ""
     ): Flow<ChatStreamEvent> = flow {
         // 注入 system prompt：明确告知可用工具，强制在生成文档时调用
         val systemMessage = ChatMessage("system", SYSTEM_PROMPT)
+        val trimmedHistory = trimHistory(messages)
+        if (trimmedHistory.size < messages.size) {
+            emit(ChatStreamEvent.ThinkingStep(
+                ThinkingPhase.PLANNING,
+                "历史较长，已省略较早的 ${messages.size - trimmedHistory.size} 条消息"
+            ))
+        }
         val updatedMessages = mutableListOf<ChatMessage>().apply {
             add(systemMessage)
-            addAll(messages)
+            addAll(trimmedHistory)
             add(ChatMessage("user", newMessage))
         }
         val tools = ToolDefs.generateDocTools()
@@ -118,6 +130,18 @@ class ChatEngine(private val appContext: Context) {
 
                     // 执行工具，拿到结果（可能生成文件）
                     val (toolResult, generatedFile) = executeTool(tc)
+                    try {
+                        auditRepo.record(
+                            sessionId = sessionId,
+                            action = tc.name,
+                            target = tc.arguments,
+                            riskLevel = "L2",
+                            success = !isToolFailure(toolResult),
+                            detail = toolResult,
+                        )
+                    } catch (e: Exception) {
+                        Logger.w("audit log failed: ${e.message}")
+                    }
 
                     // 生成文件事件
                     generatedFile?.let { emit(ChatStreamEvent.GeneratedFile(it)) }
@@ -174,6 +198,26 @@ class ChatEngine(private val appContext: Context) {
     }.flowOn(Dispatchers.IO)
 
     /** 判断用户指令是否含明确任务（需要规划） */
+    /**
+     * 上下文预算保护：从最近的消息往前保留，直到接近字符预算。
+     *
+     * DeepSeek 上下文 64K tokens；按中文约 2 字符/token 估算，
+     * 这里用 60K 字符（≈30K tokens）留足余量给 system prompt 和回复。
+     * 工具调用/结果对必须成对保留，所以按「user 消息」为边界切分。
+     */
+    private fun trimHistory(messages: List<ChatMessage>): List<ChatMessage> {
+        if (messages.isEmpty()) return messages
+        var used = 0
+        val kept = ArrayDeque<ChatMessage>()
+        for (m in messages.asReversed()) {
+            val cost = m.content.length + 32
+            if (used + cost > HISTORY_CHAR_BUDGET && kept.isNotEmpty()) break
+            used += cost
+            kept.addFirst(m)
+        }
+        return kept.toList()
+    }
+
     private fun shouldPlan(newMessage: String): Boolean = TASK_KEYWORDS.containsMatchIn(newMessage)
 
     /**

@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 
 data class CommandHistoryEntry(
@@ -82,37 +84,104 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         if (intentText.isEmpty()) return
 
         viewModelScope.launch {
-            _state.update { it.copy(isSending = true, statusMessage = "正在连接...", statusType = "running", resultText = "") }
+            _state.update { it.copy(isSending = true, statusMessage = "\u6b63\u5728\u8fde\u63a5...", statusType = "running", resultText = "") }
 
             val deviceId = prefs.deviceId.first()
             val deviceToken = prefs.deviceToken.first()
 
-            wssClient?.disconnect()
-            wssClient = RelayWssClient(getApplication())
+            // \u65ad\u7ebf\u81ea\u52a8\u91cd\u8bd5\uff1a\u590d\u7528\u540c\u4e00\u4e2a commandId\uff0c
+            // Relay \u4fa7\u636e\u6b64\u5e42\u7b49\u53bb\u91cd\uff0c\u4e0d\u4f1a\u91cd\u590d\u6267\u884c\u4efb\u52a1\u3002
+            val commandId = java.util.UUID.randomUUID().toString()
+            val maxAttempts = 3
+            var attempt = 0
+            var finished = false
 
-            wssClient?.connectAndSendCommand(
-                deviceId = deviceId,
-                deviceToken = deviceToken,
-                targetDeviceId = targetDeviceId,
-                intentText = intentText,
-                onConnected = {
-                    _state.update { it.copy(statusMessage = "已连接，等待执行...") }
-                },
-                onStateUpdate = { update ->
-                    when (update.state) {
-                        "running" -> _state.update { it.copy(statusMessage = "正在执行...", statusType = "running") }
-                        "done" -> _state.update {
-                            it.copy(isSending = false, statusMessage = "执行完成", statusType = "done", resultText = update.resultText ?: "")
-                        }
-                        "failed" -> _state.update {
-                            it.copy(isSending = false, statusMessage = "执行失败", statusType = "failed", resultText = update.resultText ?: "")
-                        }
+            while (attempt < maxAttempts && !finished) {
+                attempt++
+                if (attempt > 1) {
+                    val delayMs = 1500L * (attempt - 1)
+                    _state.update {
+                        it.copy(
+                            statusMessage = "\u8fde\u63a5\u4e2d\u65ad\uff0c${delayMs / 1000}s \u540e\u91cd\u8bd5\uff08\u7b2c $attempt \u6b21\uff09"
+                        )
                     }
-                },
-                onError = { error ->
-                    _state.update { it.copy(isSending = false, statusMessage = "连接失败", statusType = "failed", resultText = error) }
+                    kotlinx.coroutines.delay(delayMs)
                 }
-            )
+
+                wssClient?.disconnect()
+                val client = RelayWssClient(getApplication())
+                wssClient = client
+
+                val doneSignal = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                client.connectAndSendCommand(
+                    deviceId = deviceId,
+                    deviceToken = deviceToken,
+                    targetDeviceId = targetDeviceId,
+                    intentText = intentText,
+                    commandId = commandId,
+                    onConnected = {
+                        _state.update { it.copy(statusMessage = "\u5df2\u8fde\u63a5\uff0c\u7b49\u5f85\u6267\u884c...") }
+                    },
+                    onStateUpdate = { update ->
+                        when (update.state) {
+                            "running" -> _state.update {
+                                it.copy(statusMessage = "\u6b63\u5728\u6267\u884c...", statusType = "running")
+                            }
+                            "done" -> {
+                                val entry = CommandHistoryEntry(currentState.commandText, "done", update.resultText ?: "")
+                                _state.update {
+                                    it.copy(
+                                        isSending = false,
+                                        statusMessage = "\u6267\u884c\u5b8c\u6210",
+                                        statusType = "done",
+                                        resultText = update.resultText ?: "",
+                                        history = it.history + entry,
+                                        commandText = ""
+                                    )
+                                }
+                                finished = true
+                                doneSignal.complete(true)
+                            }
+                            "failed" -> {
+                                val entry = CommandHistoryEntry(currentState.commandText, "failed", update.resultText ?: "")
+                                _state.update {
+                                    it.copy(
+                                        isSending = false,
+                                        statusMessage = "\u6267\u884c\u5931\u8d25",
+                                        statusType = "failed",
+                                        resultText = update.resultText ?: "",
+                                        history = it.history + entry,
+                                        commandText = ""
+                                    )
+                                }
+                                finished = true
+                                doneSignal.complete(true)
+                            }
+                        }
+                    },
+                    onError = { error ->
+                        // \u4e0d\u7acb\u5373\u62a5\u9519\uff0c\u4ea4\u7ed9\u5916\u5c42\u91cd\u8bd5\u5faa\u73af\u5904\u7406
+                        doneSignal.complete(false)
+                        kotlinx.coroutines.runBlocking { }
+                        _state.update { it.copy(resultText = error) }
+                    }
+                )
+
+                // \u7b49\u5f85\u672c\u6b21\u5c1d\u8bd5\u7ed3\u675f\uff08\u6210\u529f\u3001\u5931\u8d25\u6216 30s \u8d85\u65f6\uff09
+                val settled = withTimeoutOrNull(30_000L) { doneSignal.await() } ?: false
+                if (settled || finished) break
+            }
+
+            if (!finished) {
+                _state.update {
+                    it.copy(
+                        isSending = false,
+                        statusMessage = "\u8fde\u63a5\u5931\u8d25",
+                        statusType = "failed",
+                        resultText = it.resultText.ifEmpty { "\u5df2\u91cd\u8bd5 $maxAttempts \u6b21\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u540e\u91cd\u8bd5" }
+                    )
+                }
+            }
         }
     }
 

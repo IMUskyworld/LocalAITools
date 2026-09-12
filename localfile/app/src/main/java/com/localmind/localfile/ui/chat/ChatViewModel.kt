@@ -187,7 +187,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(attachedFile = null, attachedFileContent = null) }
 
                 // Stream AI response（含 Agent 循环：可能生成文件）
-                chatEngine.sendMessage(messagesForAI, input).collect { event ->
+                chatEngine.sendMessage(messagesForAI, input, sessionId).collect { event ->
                     when (event) {
                         is ChatStreamEvent.StreamStart -> _state.update { it.copy(isStreaming = true, thinkingSteps = emptyList()) }
                         is ChatStreamEvent.Token -> _state.update { it.copy(streamingContent = it.streamingContent + event.text) }

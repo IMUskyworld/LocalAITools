@@ -40,7 +40,9 @@ class RelayWssClient(
         intentText: String,
         onStateUpdate: (StateUpdate) -> Unit,
         onConnected: () -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        /** 重试时必须复用同一个 command_id，Relay 侧据此幂等去重，避免重复执行 */
+        commandId: String = java.util.UUID.randomUUID().toString()
     ) {
         val wsUrl = baseUrl.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
         val request = Request.Builder()
@@ -62,7 +64,7 @@ class RelayWssClient(
                     put("to_device_id", targetDeviceId)
                     put("action_type", "chat_task")
                     put("intent_text", intentText)
-                    put("command_id", java.util.UUID.randomUUID().toString())
+                    put("command_id", commandId)
                     put("timestamp", System.currentTimeMillis())
                 }
                 webSocket.send(envelope.toString())
