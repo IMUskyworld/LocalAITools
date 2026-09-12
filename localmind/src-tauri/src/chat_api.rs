@@ -140,6 +140,29 @@ pub async fn set_api_key(
 }
 
 #[tauri::command]
+pub async fn save_audit_log(
+    state: State<'_, crate::AppState>,
+    session_id: Option<String>,
+    action: String,
+    target: Option<String>,
+    risk_level: String,
+    result: String,
+    detail: Option<String>,
+) -> Result<AppResponse<bool>, String> {
+    let storage = state.storage.read().await;
+    match storage.save_audit_log(
+        session_id.as_deref(),
+        &action,
+        target.as_deref(),
+        &risk_level,
+        &result,
+        detail.as_deref(),
+    ).await {
+        Ok(()) => Ok(AppResponse::ok(true)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+#[tauri::command]
 pub async fn get_session_summary(
     state: State<'_, crate::AppState>,
     session_id: String,

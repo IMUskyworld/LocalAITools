@@ -52,6 +52,7 @@ async fn main() {
             chat_api::get_api_key,
             chat_api::set_api_key,
             chat_api::get_session_summary,
+            chat_api::save_audit_log,
             chat_api::save_session_summary,
             chat_api::get_memories,
             chat_api::save_memory,

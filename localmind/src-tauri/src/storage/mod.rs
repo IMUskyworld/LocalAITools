@@ -438,6 +438,31 @@ impl StorageManager {
         })
         .await
     }
+    pub async fn save_audit_log(
+        &self,
+        session_id: Option<&str>,
+        action: &str,
+        target: Option<&str>,
+        risk_level: &str,
+        result: &str,
+        detail: Option<&str>,
+    ) -> Result<(), String> {
+        let sid = session_id.map(|s| s.to_string());
+        let act = action.to_string();
+        let tgt = target.map(|s| s.to_string());
+        let rl = risk_level.to_string();
+        let res = result.to_string();
+        let det = detail.map(|s| s.to_string());
+        let now = chrono::Utc::now().timestamp_millis();
+        self.with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO audit_log (id, session_id, action, target, risk_level, result, detail, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![uuid::Uuid::new_v4().to_string(), sid, act, tgt, rl, res, det, now],
+            ).map_err(|e| format!("database error: {e}"))?;
+            Ok(())
+        })
+        .await
+    }
     pub async fn get_session_summary(&self, session_id: &str) -> Result<Option<String>, String> {
         let sid = session_id.to_string();
         self.with_conn(move |conn| {

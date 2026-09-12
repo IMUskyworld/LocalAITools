@@ -99,7 +99,18 @@ export function useStreamChat(): UseStreamChatReturn {
         messages: agentMessages,
         selectedAttachmentPaths: attachments.map((attachment) => attachment.path),
         signal: controller.signal,
-        onToolCall: addToolCall,
+        onToolCall: (log) => {
+          addToolCall(log);
+          // L2+ 工具写入审计日志
+          tauriInvoke('save_audit_log', {
+            sessionId,
+            action: log.name,
+            target: log.args?.substring?.(0, 200) || null,
+            riskLevel: log.success ? 'L2' : 'L2',
+            result: log.success ? 'success' : 'failed',
+            detail: log.output?.substring?.(0, 500) || null,
+          }).catch(() => {});
+        },
         onThinking: addThinkingStep,
         onConfirm: async (req) => {
           const argsStr = JSON.stringify(req.args, null, 2);
