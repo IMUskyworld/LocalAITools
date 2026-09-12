@@ -34,7 +34,7 @@
 - **GUI 已美化**：蓝紫渐变设计系统、顶栏（模型徽章/在线状态/主题切换）、底部状态栏、欢迎页 + 6 快捷指令卡片、模型/设置页卡片化
 - **Agent 工具 7 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
-- **已打包（Phase 3，2026-09-12 02:00，含 Context Manager + 长期 Memory）**：`LocalMind.exe`（19.9MB，SHA256 `0C8DFC7046F96D00CBC0278A26D628440957BB4C23DAA544993866D21308C6B3`）+ `LocalMindSetup.exe`（50.9MB）+ `LocalFile.apk`（14.9MB）；APK 不含任何内置 key。
+- **已打包（v0.3.0 Phase 4，2026-09-12 04:00，含确认UI+审计日志+记忆管理+工具卡片+AI摘要+远程控制）**：`LocalMind.exe`（19.9MB，SHA256 `0C8DFC7046F96D00CBC0278A26D628440957BB4C23DAA544993866D21308C6B3`）+ `LocalMindSetup.exe`（50.9MB）+ `LocalFile.apk`（14.9MB）；APK 不含任何内置 key。
 
 ## 关键决策（ADR 摘要）
 
