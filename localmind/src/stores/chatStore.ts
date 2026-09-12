@@ -206,7 +206,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         createdAt: item.created_at,
         updatedAt: item.updated_at,
       }));
-      set({ sessions, error: null });
+      const currentSessionId = sessions.length > 0 && !get().currentSessionId ? sessions[0].id : get().currentSessionId;
+      set({ sessions, currentSessionId, error: null });
     } catch (error) {
       set({ error: errorText(error) });
       throw error;
