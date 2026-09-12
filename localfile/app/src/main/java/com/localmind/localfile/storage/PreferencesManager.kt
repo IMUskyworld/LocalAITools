@@ -9,8 +9,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
@@ -85,14 +83,8 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
     }
 
-    val deviceToken: Flow<String> = flow {
-        val encrypted = EncryptedPrefs.getString(context, KEY_DEVICE_TOKEN.name)
-        if (encrypted.isNotEmpty()) { emit(encrypted) }
-        else {
-            val legacy = context.dataStore.data.map { p -> p[KEY_DEVICE_TOKEN] ?: "" }.first()
-            if (legacy.isNotEmpty()) { EncryptedPrefs.putString(context, KEY_DEVICE_TOKEN.name, legacy); context.dataStore.edit { p -> p.remove(KEY_DEVICE_TOKEN) } }
-            emit(legacy)
-        }
+    val deviceToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_DEVICE_TOKEN] ?: ""
     }
 
     suspend fun setDeviceCredentials(id: String, token: String) {
@@ -103,24 +95,12 @@ class PreferencesManager(private val context: Context) {
     }
 
     // Account session
-    val accountAccessToken: Flow<String> = flow {
-        val encrypted = EncryptedPrefs.getString(context, KEY_ACCOUNT_ACCESS_TOKEN.name)
-        if (encrypted.isNotEmpty()) { emit(encrypted) }
-        else {
-            val legacy = context.dataStore.data.map { p -> p[KEY_ACCOUNT_ACCESS_TOKEN] ?: "" }.first()
-            if (legacy.isNotEmpty()) { EncryptedPrefs.putString(context, KEY_ACCOUNT_ACCESS_TOKEN.name, legacy); context.dataStore.edit { p -> p.remove(KEY_ACCOUNT_ACCESS_TOKEN) } }
-            emit(legacy)
-        }
+    val accountAccessToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_ACCESS_TOKEN] ?: ""
     }
 
-    val accountRefreshToken: Flow<String> = flow {
-        val encrypted = EncryptedPrefs.getString(context, KEY_ACCOUNT_REFRESH_TOKEN.name)
-        if (encrypted.isNotEmpty()) { emit(encrypted) }
-        else {
-            val legacy = context.dataStore.data.map { p -> p[KEY_ACCOUNT_REFRESH_TOKEN] ?: "" }.first()
-            if (legacy.isNotEmpty()) { EncryptedPrefs.putString(context, KEY_ACCOUNT_REFRESH_TOKEN.name, legacy); context.dataStore.edit { p -> p.remove(KEY_ACCOUNT_REFRESH_TOKEN) } }
-            emit(legacy)
-        }
+    val accountRefreshToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ACCOUNT_REFRESH_TOKEN] ?: ""
     }
 
     val accountEmail: Flow<String> = context.dataStore.data.map { prefs ->
@@ -138,20 +118,20 @@ class PreferencesManager(private val context: Context) {
         displayName: String
     ) {
         context.dataStore.edit { prefs ->
+            prefs[KEY_ACCOUNT_ACCESS_TOKEN] = accessToken
+            prefs[KEY_ACCOUNT_REFRESH_TOKEN] = refreshToken
             prefs[KEY_ACCOUNT_EMAIL] = email
             prefs[KEY_ACCOUNT_DISPLAY_NAME] = displayName
         }
-        EncryptedPrefs.putString(context, KEY_ACCOUNT_ACCESS_TOKEN.name, accessToken)
-        EncryptedPrefs.putString(context, KEY_ACCOUNT_REFRESH_TOKEN.name, refreshToken)
     }
 
     suspend fun clearAccountSession() {
         context.dataStore.edit { prefs ->
+            prefs.remove(KEY_ACCOUNT_ACCESS_TOKEN)
+            prefs.remove(KEY_ACCOUNT_REFRESH_TOKEN)
             prefs.remove(KEY_ACCOUNT_EMAIL)
             prefs.remove(KEY_ACCOUNT_DISPLAY_NAME)
         }
-        EncryptedPrefs.remove(context, KEY_ACCOUNT_ACCESS_TOKEN.name)
-        EncryptedPrefs.remove(context, KEY_ACCOUNT_REFRESH_TOKEN.name)
     }
 
     // Device name
@@ -195,24 +175,13 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_TENANT_ID] = id }
     }
 
-    // Gateway token (encrypted)
-    val gatewayToken: Flow<String> = flow {
-        // 优先从加密存储读取；如果没有，尝试从 DataStore 迁移
-        val encrypted = EncryptedPrefs.getString(context, KEY_GATEWAY_TOKEN.name)
-        if (encrypted.isNotEmpty()) {
-            emit(encrypted)
-        } else {
-            val legacy = context.dataStore.data.map { prefs -> prefs[KEY_GATEWAY_TOKEN] ?: "" }.first()
-            if (legacy.isNotEmpty()) {
-                EncryptedPrefs.putString(context, KEY_GATEWAY_TOKEN.name, legacy)
-                context.dataStore.edit { prefs -> prefs.remove(KEY_GATEWAY_TOKEN) }
-            }
-            emit(legacy)
-        }
+    // Gateway token
+    val gatewayToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_GATEWAY_TOKEN] ?: ""
     }
 
     suspend fun setGatewayToken(token: String) {
-        EncryptedPrefs.putString(context, KEY_GATEWAY_TOKEN.name, token)
+        context.dataStore.edit { prefs -> prefs[KEY_GATEWAY_TOKEN] = token }
     }
 
     // Offline model

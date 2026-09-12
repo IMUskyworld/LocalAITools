@@ -32,6 +32,13 @@ pub struct StorageManager {
     db_path: PathBuf,
 }
 
+fn auth_config_path() -> std::path::PathBuf {
+    let base = std::env::var("APPDATA")
+        .or_else(|_| std::env::var("HOME").map(|h| format!("{}/.config", h)))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(base).join("LocalMind").join("auth.json")
+}
+
 impl StorageManager {
     pub fn new() -> Result<Self, String> {
         Self::with_path(default_db_path()?)
@@ -360,22 +367,16 @@ impl StorageManager {
 
 
     pub async fn get_api_key(&self) -> Result<Option<String>, String> {
-        self.with_conn(|conn| {
-            let stored = get_setting(conn, "deepseek_api_key")?;
-            match stored {
-                Some(val) => {
-                    let device_id = get_setting(conn, "device_id")?.unwrap_or_default();
-                    if val.starts_with("ENC:") {
-                        let decrypted = crate::crypto_util::decrypt_string(&val[4..], &device_id)?;
-                        Ok(Some(decrypted))
-                    } else {
-                        Ok(Some(val))
-                    }
-                }
-                None => Ok(None),
-            }
-        })
-        .await
+        let path = auth_config_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取 auth.json 失败: {e}"))?;
+        let config: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 auth.json 失败: {e}"))?;
+        let key = config["deepseek_api_key"].as_str().unwrap_or("");
+        if key.is_empty() { Ok(None) } else { Ok(Some(key.to_string())) }
     }
 
     pub async fn set_api_key(&self, key: String) -> Result<(), String> {
