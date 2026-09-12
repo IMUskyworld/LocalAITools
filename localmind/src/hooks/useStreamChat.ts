@@ -124,11 +124,14 @@ export function useStreamChat(): UseStreamChatReturn {
 
       const saved = await completeTurn(turnId, contentWithTools, activeModelLabel);
 
-      // 保存 session summary（异步，不阻塞 UI）
-      const turnSummary = content.substring(0, 200).trim();
-      if (turnSummary) {
-        tauriInvoke('save_session_summary', { sessionId, summary: turnSummary }).catch(() => {});
-      }
+      // AI 辅助摘要生成（异步，不阻塞 UI）
+      generateSummary(content, result.toolLogs).then((summary) => {
+        if (summary) tauriInvoke('save_session_summary', { sessionId, summary }).catch(() => {});
+      }).catch(() => {
+        // fallback: 截取前200字
+        const fallback = content.substring(0, 200).trim();
+        if (fallback) tauriInvoke('save_session_summary', { sessionId, summary: fallback }).catch(() => {});
+      });
       updateMessage(sessionId, assistantId, {
         id: saved.id,
         content: saved.content,
@@ -194,6 +197,47 @@ function withSummary(messages: AgentMessage[], summary: string): AgentMessage[] 
   }
   return [{ role: 'system', content: summaryBlock }, ...messages];
 }
+
+async function generateSummary(content: string, toolLogs: {name:string;output:string;success:boolean}[]): Promise<string> {
+  // 用 Agent 生成摘要：把最后一轮的 assistant 回复 + 工具结果作为输入
+  try {
+    const config: any = await tauriInvoke('get_agent_config');
+    if (!config?.data?.port) return '';
+    const keyRes: any = await tauriInvoke('get_api_key');
+    const token = keyRes?.data || '';
+    const toolInfo = toolLogs.map((l) => l.name + ': ' + (l.success ? 'OK' : 'FAIL')).join(', ');
+    const prompt = '请用一句简洁的中文总结本轮对话的关键事实和结果（不超过100字）。工具调用：' + (toolInfo || '无') + '\n回复内容：' + content.substring(0, 500);
+    const res = await fetch('http://127.0.0.1:' + config.data.port + '/agent/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-LocalMind-Token': config.data.token },
+      body: JSON.stringify({ mode: 'online', model: 'deepseek-flash', messages: [{ role: 'user', content: prompt }], token }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok || !res.body) return '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let summary = '';
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() || '';
+      for (const ev of events) {
+        if (!ev.trim().startsWith('data: ')) continue;
+        try {
+          const obj = JSON.parse(ev.trim().slice(6));
+          if (obj.type === 'delta') summary += obj.text || '';
+          if (obj.type === 'done') summary = obj.content ?? summary;
+        } catch {}
+      }
+    }
+    reader.releaseLock();
+    return summary.trim().substring(0, 200);
+  } catch { return ''; }
+}
+
 // ========== 工具调用嵌入（跨轮记忆修复） ==========
 
 function embedToolLogs(content: string, toolLogs: { name: string; args: string; output: string; success: boolean }[]): string {

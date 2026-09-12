@@ -1,6 +1,6 @@
 [package]
 name = "localmind"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "LocalMind Windows 桌面端 — Tauri 2.x + Rust"
 
