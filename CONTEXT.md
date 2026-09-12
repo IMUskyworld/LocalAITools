@@ -15,7 +15,7 @@
 | 词 | 含义 |
 |---|---|
 | Agent | LocalMind 的 Python 子进程（Pydantic AI 2.x），负责 规划→工具调用→反思 循环 |
-| Agent 工具 | agent 可调用的 7 个工具（见下节） |
+| Agent 工具 | agent 可调用的 9 个工具（见下节） |
 | 模式 | 在线（DeepSeek 云端）/ 离线（Ollama 本地模型） |
 | make_doc | 文档生成器 exe（PPT/Word/Excel/PDF），agent 的 create_doc 底层调用 |
 | AgentServer | `localmind/scripts/agent_server.py`，SSE HTTP 服务，Rust 懒启动 |
