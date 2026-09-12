@@ -32,6 +32,17 @@ pub struct StorageManager {
     db_path: PathBuf,
 }
 
+/// 轻量诊断日志（写到 %TEMP%/localmind-rust.log），用于排查 key 读取问题。
+/// 只记录路径/长度等元信息，绝不记录 key 内容。
+fn diag_log(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("localmind-rust.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 fn auth_config_path() -> std::path::PathBuf {
     let base = std::env::var("APPDATA")
         .or_else(|_| std::env::var("HOME").map(|h| format!("{}/.config", h)))
@@ -371,19 +382,65 @@ impl StorageManager {
 
 
     pub async fn get_api_key(&self) -> Result<Option<String>, String> {
+        // 1) 首选 auth.json（用户自填模式的主存储）
         let path = auth_config_path();
-        if !path.exists() {
-            return Ok(None);
+        diag_log(&format!(
+            "get_api_key: path={} exists={}",
+            path.display(),
+            path.exists()
+        ));
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let key = config["deepseek_api_key"].as_str().unwrap_or("");
+                    diag_log(&format!("get_api_key: auth.json key_len={}", key.len()));
+                    if !key.is_empty() {
+                        return Ok(Some(key.to_string()));
+                    }
+                }
+            }
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读取 auth.json 失败: {e}"))?;
-        let config: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("解析 auth.json 失败: {e}"))?;
-        let key = config["deepseek_api_key"].as_str().unwrap_or("");
-        if key.is_empty() { Ok(None) } else { Ok(Some(key.to_string())) }
+        // 2) 回退 SQLite（兼容旧版本把 key 存在 app_settings 的情况）
+        let sqlite_key = self
+            .with_conn(|conn| get_setting(conn, "deepseek_api_key"))
+            .await?;
+        diag_log(&format!(
+            "get_api_key: sqlite fallback len={}",
+            sqlite_key.as_deref().map(|s| s.len()).unwrap_or(0)
+        ));
+        match sqlite_key {
+            Some(k) if !k.is_empty() => {
+                // 顺手迁移到 auth.json，之后就读不到了
+                let _ = self.set_api_key(k.clone()).await;
+                Ok(Some(k))
+            }
+            _ => Ok(None),
+        }
     }
 
     pub async fn set_api_key(&self, key: String) -> Result<(), String> {
+        // 主存储：auth.json（用户可见、便于排查）
+        let path = auth_config_path();
+        let mut config = if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if !config.is_object() {
+            config = serde_json::json!({});
+        }
+        config["deepseek_api_key"] = serde_json::Value::String(key.clone());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+        }
+        let json = serde_json::to_string_pretty(&config)
+            .map_err(|e| format!("序列化 auth.json 失败: {e}"))?;
+        std::fs::write(&path, json).map_err(|e| format!("写入 auth.json 失败: {e}"))?;
+
+        // 备份存储：SQLite（兼容读取路径）
         self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &key))
             .await
     }
@@ -637,6 +694,27 @@ pub async fn get_app_info(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn api_key_roundtrip_is_consistent() {
+        // 回归测试：set_api_key 与 get_api_key 必须使用同一存储，
+        // 否则会出现「保存成功但读不到」的问题（曾导致 401 Missing credentials）。
+        let dir = tempfile::tempdir().unwrap();
+        let manager = StorageManager::with_path(dir.path().join("localmind.db")).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // 注意：auth.json 位于真实的 %APPDATA%，因此这里不假设初始为空，
+        // 只验证「写进去的能原样读回来」这一核心不变量。
+        let key = "sk-test-roundtrip-1234567890";
+        rt.block_on(manager.set_api_key(key.to_string())).unwrap();
+        let read_back = rt.block_on(manager.get_api_key()).unwrap();
+        assert_eq!(read_back.as_deref(), Some(key), "set/get used different storage");
+
+        let key2 = "sk-test-roundtrip-0987654321";
+        rt.block_on(manager.set_api_key(key2.to_string())).unwrap();
+        let read_back2 = rt.block_on(manager.get_api_key()).unwrap();
+        assert_eq!(read_back2.as_deref(), Some(key2));
+    }
     use super::*;
 
     fn manager() -> (tempfile::TempDir, StorageManager) {

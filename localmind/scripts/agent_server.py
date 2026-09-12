@@ -959,6 +959,11 @@ class AgentHandler(BaseHTTPRequestHandler):
                 model_name = body.get("model") or DEFAULT_ONLINE_MODEL
                 # 用户自填的 key 优先；环境变量仅作开发调试兜底
                 token = body.get("token") or os.environ.get("LOCALMIND_DEEPSEEK_KEY", "")
+                # 诊断：只打印是否收到 key 和末尾 4 位，绝不打印完整 key
+                if token:
+                    _log(f"KEY received: len={len(token)} tail=...{token[-4:]}")
+                else:
+                    _log("KEY missing: body.token 为空且环境变量未设置")
                 model = OpenAIChatModel(
                     model_name,
                     provider=OpenAIProvider(base_url=DEEPSEEK_BASE, api_key=token),

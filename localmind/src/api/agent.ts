@@ -88,9 +88,14 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   let elapsedMs = 0;
 
   try {
-    // 用户在设置页填写的 API key 从 SQLite 读取，随请求传给 Agent。
+    // 用户在设置页填写的 API key 从 auth.json 读取，随请求传给 Agent。
     const keyRes: any = await tauriInvoke('get_api_key');
     const userApiKey: string = keyRes?.data || '';
+    // 在线模式必须有 key，否则 Agent 会抛出难懂的 "Missing credentials"。
+    // 这里提前给出可操作的中文提示。
+    if (opts.mode === 'online' && !userApiKey.trim()) {
+      throw new Error('尚未配置 API Key：请到「设置」页填入 DeepSeek API Key 并点击保存，然后点「测试联通」确认可用。');
+    }
 
     const res = await fetch(`http://127.0.0.1:${config.port}/agent/stream`, {
       method: 'POST',
