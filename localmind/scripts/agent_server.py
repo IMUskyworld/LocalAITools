@@ -870,11 +870,12 @@ class AgentHandler(BaseHTTPRequestHandler):
             tools = build_tools(self._emit_thinking, policy, trace=trace, variant=variant)
             prompt, history = split_messages(body.get("messages", []))
 
-            # Context Manager：截断过长的 history
+            system_prompt = build_system_prompt(desktop, variant)
+
+            # Context Manager
             system_prompt_tokens = estimate_tokens(system_prompt)
             prompt_tokens = estimate_tokens(prompt)
             history = truncate_history(history, system_prompt_tokens, prompt_tokens)
-            system_prompt = build_system_prompt(desktop, variant)
             trace.record(
                 "context_built",
                 model=model_name,
