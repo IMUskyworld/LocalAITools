@@ -101,6 +101,10 @@ export function useStreamChat(): UseStreamChatReturn {
         signal: controller.signal,
         onToolCall: addToolCall,
         onThinking: addThinkingStep,
+        onConfirm: async (req) => {
+          const argsStr = JSON.stringify(req.args, null, 2);
+          return window.confirm('Confirm ' + req.tool + '?\n\n' + argsStr);
+        },
       });
       partialContent = result.content;
 

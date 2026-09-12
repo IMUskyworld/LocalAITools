@@ -20,6 +20,12 @@ export interface ToolLog {
   success: boolean;
 }
 
+export interface ConfirmRequest {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+}
+
 export interface AgentRunOptions {
   mode: 'online' | 'offline';
   model: string;              // 离线时的模型名
@@ -28,6 +34,7 @@ export interface AgentRunOptions {
   signal?: AbortSignal;       // 停止生成
   onToolCall?: (log: ToolLog) => void;
   onThinking?: (step: ThinkingStep) => void;  // 思考过程回调（规划/执行/反思）
+  onConfirm?: (request: ConfirmRequest) => Promise<boolean>;
 }
 
 export interface AgentRunResult {
@@ -133,6 +140,17 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
             case 'done':
               content = obj.content ?? content;
               break;
+            case 'confirm': {
+              const confirmReq: ConfirmRequest = { id: obj.id, tool: obj.tool, args: obj.args };
+              const confirmed = opts.onConfirm ? await opts.onConfirm(confirmReq) : false;
+              // 发送确认响应到 Agent
+              fetch(`http://127.0.0.1:${config.port}/agent/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-LocalMind-Token': config.token },
+                body: JSON.stringify({ id: confirmReq.id, confirmed }),
+              }).catch(() => {});
+              break;
+            }
             case 'error':
               throw new Error(obj.message || 'Agent 执行失败');
           }

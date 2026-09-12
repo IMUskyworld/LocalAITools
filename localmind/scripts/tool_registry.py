@@ -17,6 +17,7 @@ class ToolSpec:
     timeout_ms: int
     max_output_chars: int
     cacheable: bool
+    confirmation_required: bool = False
     enabled: bool = True
 
 
@@ -83,6 +84,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         timeout_ms=30_000,
         max_output_chars=50_000,
         cacheable=False,
+        confirmation_required=True,
     ),
     "delete_path": ToolSpec(
         name="delete_path",
@@ -92,6 +94,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         timeout_ms=15_000,
         max_output_chars=4_000,
         cacheable=False,
+        confirmation_required=True,
     ),
     "create_doc": ToolSpec(
         name="create_doc",

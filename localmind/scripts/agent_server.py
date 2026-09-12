@@ -114,6 +114,57 @@ def truncate_history(history: list, system_prompt_tokens: int, prompt_tokens: in
 
     kept.reverse()
     return kept
+# ========== 高危操作确认机制 ==========
+
+import threading
+
+_pending_confirmations: dict[str, dict] = {}
+_confirm_results: dict[str, bool] = {}
+_confirm_events: dict[str, threading.Event] = {}
+_confirm_lock = threading.Lock()
+
+
+def request_confirmation(tool_name: str, args: dict, emit_sse_event) -> bool:
+    """请求用户确认。发送 confirm SSE 事件并阻塞等待用户响应。返回 True=确认，False=拒绝。"""
+    import uuid
+    confirm_id = str(uuid.uuid4())
+    event = threading.Event()
+
+    with _confirm_lock:
+        _pending_confirmations[confirm_id] = {"tool": tool_name, "args": args}
+        _confirm_events[confirm_id] = event
+
+    # 发送确认请求到前端
+    emit_sse_event({
+        "type": "confirm",
+        "id": confirm_id,
+        "tool": tool_name,
+        "args": args,
+    })
+
+    # 阻塞等待用户响应（最多60秒）
+    if not event.wait(timeout=60):
+        with _confirm_lock:
+            _pending_confirmations.pop(confirm_id, None)
+            _confirm_events.pop(confirm_id, None)
+        return False  # 超时视为拒绝
+
+    with _confirm_lock:
+        result = _confirm_results.pop(confirm_id, False)
+        _pending_confirmations.pop(confirm_id, None)
+        _confirm_events.pop(confirm_id, None)
+    return result
+
+
+def handle_confirm_response(confirm_id: str, confirmed: bool) -> bool:
+    """处理前端发回的确认响应。返回 True=找到并处理，False=ID 不存在或已过期。"""
+    with _confirm_lock:
+        event = _confirm_events.get(confirm_id)
+        if event is None:
+            return False
+        _confirm_results[confirm_id] = confirmed
+        event.set()
+        return True
 # ========== 桌面路径解析（不依赖前端 IPC，自给自足） ==========
 
 def resolve_desktop_path() -> str:
@@ -472,6 +523,13 @@ def build_tools(
                 return _structured_error("DUPLICATE_TOOL_CALL", f"同一 Turn 内已执行过完全相同的 {name} 调用，禁止重复执行")
             if trace:
                 trace.record("tool_call_started", tool=name, args_hash=fingerprint)
+            # 高危工具需要用户确认
+            spec = TOOL_SPECS.get(name)
+            if spec and spec.confirmation_required:
+                confirmed = request_confirmation(name, kwargs, lambda evt: emit_thinking("confirming", json.dumps(evt, ensure_ascii=False), "running"))
+                if not confirmed:
+                    return _structured_error("CONFIRMATION_DENIED", f"用户拒绝执行 {name}", retryable=False)
+
             try:
                 output = str(fn(**kwargs) or "")
                 if v2 and _is_declared_failure(name, output):
@@ -651,6 +709,24 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     # ---- CORS 工具 ----
 
+    def _handle_confirm(self):
+        """处理前端发回的确认/拒绝响应。"""
+        length = int(self.headers.get("Content-Length", 0))
+        if length <= 0:
+            self._send_json({"error": "empty body"}, 400)
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception as e:
+            self._send_json({"error": f"bad json: {e}"}, 400)
+            return
+        confirm_id = body.get("id", "")
+        confirmed = body.get("confirmed", False)
+        if not confirm_id:
+            self._send_json({"error": "missing id"}, 400)
+            return
+        handled = handle_confirm_response(confirm_id, bool(confirmed))
+        self._send_json({"ok": handled})
     def _cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
@@ -682,6 +758,8 @@ class AgentHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/agent/stream"):
             self._stream_agent()
+        elif self.path == "/agent/confirm":
+            self._handle_confirm()
         else:
             self._send_json({"error": "not found"}, 404)
 
