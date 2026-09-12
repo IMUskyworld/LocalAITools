@@ -8,7 +8,7 @@ import java.util.UUID
 
 class ChatRepository(context: Context) {
     data class Session(val id: String, val title: String, val createdAt: Long, val updatedAt: Long)
-    data class Message(val id: String, val sessionId: String, val role: String, val content: String, val modelLabel: String, val createdAt: Long)
+    data class Message(val id: String, val sessionId: String, val role: String, val content: String, val modelLabel: String, val tokenCount: Int = 0, val createdAt: Long)
 
     private val db = AppDatabase.getInstance(context)
     private val sessionDao = db.sessionDao()
@@ -39,7 +39,13 @@ class ChatRepository(context: Context) {
         return messageDao.getMessagesBySessionOnce(sessionId).map { it.toMessage() }
     }
 
-    suspend fun appendMessage(sessionId: String, role: String, content: String, modelLabel: String): Message {
+    suspend fun appendMessage(
+        sessionId: String,
+        role: String,
+        content: String,
+        modelLabel: String,
+        tokenCount: Int = 0
+    ): Message {
         val now = System.currentTimeMillis()
         val entity = MessageEntity(
             id = UUID.randomUUID().toString(),
@@ -47,6 +53,7 @@ class ChatRepository(context: Context) {
             role = role,
             content = content,
             modelName = modelLabel,
+            tokenCount = tokenCount,
             createdAt = now
         )
         messageDao.insertMessage(entity)
@@ -56,5 +63,5 @@ class ChatRepository(context: Context) {
     }
 
     private fun SessionEntity.toSession() = Session(id, title, createdAt, updatedAt)
-    private fun MessageEntity.toMessage() = Message(id, sessionId, role, content, modelName, createdAt)
+    private fun MessageEntity.toMessage() = Message(id, sessionId, role, content, modelName, tokenCount, createdAt)
 }

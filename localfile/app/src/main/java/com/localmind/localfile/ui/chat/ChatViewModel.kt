@@ -196,12 +196,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         is ChatStreamEvent.ThinkingStep -> _state.update { it.copy(thinkingSteps = it.thinkingSteps + event) }
                         is ChatStreamEvent.StreamEnd -> {
                             val fullContent = _state.value.streamingContent
+                            val usage = event.usage
                             if (fullContent.isNotEmpty()) {
-                                chatRepo.appendMessage(sessionId, "assistant", fullContent, modelLabel())
+                                chatRepo.appendMessage(
+                                    sessionId, "assistant", fullContent, modelLabel(),
+                                    tokenCount = usage?.totalTokens ?: 0,
+                                )
                             }
                             _state.update {
-                                it.copy(messages = it.messages + ChatMessage("assistant", fullContent),
-                                    isStreaming = false, streamingContent = "", speedText = "")
+                                it.copy(
+                                    messages = it.messages + ChatMessage("assistant", fullContent, usage = usage),
+                                    isStreaming = false, streamingContent = "", speedText = ""
+                                )
                             }
                         }
                         is ChatStreamEvent.Error -> _state.update { it.copy(isStreaming = false, error = event.message) }

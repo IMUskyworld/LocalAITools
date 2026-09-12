@@ -29,6 +29,7 @@ fun MessageBubble(
     isUser: Boolean,
     modelLabel: String = "",
     speedText: String = "",
+    usage: com.localmind.localfile.common.TokenUsage? = null,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor = if (isUser) {
@@ -87,13 +88,37 @@ fun MessageBubble(
                     color = textColor
                 )
             }
-            if (!isUser && speedText.isNotEmpty()) {
-                Text(
-                    text = speedText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(start = 12.dp, top = 2.dp)
-                )
+            if (!isUser && (speedText.isNotEmpty() || (usage != null && usage.totalTokens > 0))) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (speedText.isNotEmpty()) {
+                        Text(
+                            text = speedText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    if (usage != null && usage.totalTokens > 0) {
+                        if (speedText.isNotEmpty()) {
+                            Text(
+                                text = " · ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        Text(
+                            text = buildString {
+                                append("Σ ")
+                                append("%,d".format(usage.totalTokens))
+                                append(" tok")
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
             }
         }
     }

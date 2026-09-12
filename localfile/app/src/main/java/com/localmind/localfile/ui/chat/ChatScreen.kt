@@ -250,7 +250,8 @@ fun ChatScreen(
                             MessageBubble(
                                 text = message.content,
                                 isUser = message.role == "user",
-                                modelLabel = if (message.role == "assistant") "AI" else ""
+                                modelLabel = if (message.role == "assistant") "AI" else "",
+                                usage = message.usage
                             )
                         }
 

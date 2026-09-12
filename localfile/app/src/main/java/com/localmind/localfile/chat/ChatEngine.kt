@@ -156,16 +156,20 @@ class ChatEngine(private val appContext: Context) {
 
             // === 流式输出最终回复 ===
             val finalMessages = currentMessages
-            gatewayClient.chatCompletionStream(finalMessages).collect { chunk ->
+            var finalUsage: com.localmind.localfile.common.TokenUsage? = null
+            gatewayClient.chatCompletionStream(
+                finalMessages,
+                onUsage = { u -> finalUsage = u },
+            ).collect { chunk ->
                 emit(ChatStreamEvent.Token(chunk))
             }
 
-            emit(ChatStreamEvent.StreamEnd)
+            emit(ChatStreamEvent.StreamEnd(finalUsage))
         } catch (e: Exception) {
             Logger.e("Chat error", e)
             emit(ChatStreamEvent.Token("[在线] 已收到您的消息：$newMessage\n"))
             emit(ChatStreamEvent.Token("\n\n提示：连接出现异常，这是本地回显。请检查网络后重试。"))
-            emit(ChatStreamEvent.StreamEnd)
+            emit(ChatStreamEvent.StreamEnd(null))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -341,7 +345,7 @@ sealed class ChatStreamEvent {
     data class ToolCall(val name: String, val arguments: String) : ChatStreamEvent()
     data class GeneratedFile(val file: java.io.File) : ChatStreamEvent()
     data object ToolCallEnd : ChatStreamEvent()
-    data object StreamEnd : ChatStreamEvent()
+    data class StreamEnd(val usage: com.localmind.localfile.common.TokenUsage? = null) : ChatStreamEvent()
     data class Error(val message: String) : ChatStreamEvent()
     data class ThinkingStep(val phase: ThinkingPhase, val label: String, val detail: String? = null) : ChatStreamEvent()
 }

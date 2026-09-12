@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
@@ -110,6 +111,13 @@ fun SettingsScreen(
         item {
             var showKey by remember { mutableStateOf(false) }
             var editingKey by remember { mutableStateOf(state.apiKey) }
+            // state.apiKey 是异步从 DataStore 读出来的，初次组合时还是空串。
+            // 这里在它变化时同步到输入框，否则已保存的 key 不会显示出来。
+            LaunchedEffect(state.apiKey) {
+                if (state.apiKey.isNotEmpty() && editingKey.isEmpty()) {
+                    editingKey = state.apiKey
+                }
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -172,7 +180,7 @@ fun SettingsScreen(
                 subtitle = when (state.gatewayStatus) {
                     ConnectionStatusUI.CONNECTED -> "已连接"
                     ConnectionStatusUI.DISCONNECTED -> "未连接"
-                    ConnectionStatusUI.ERROR -> "连接错误"
+                    ConnectionStatusUI.ERROR -> state.gatewayError ?: "连接错误"
                     ConnectionStatusUI.UNKNOWN -> "未检测"
                 },
                 icon = Icons.Default.SignalWifiStatusbar4Bar,
@@ -180,9 +188,15 @@ fun SettingsScreen(
                     when (state.gatewayStatus) {
                         ConnectionStatusUI.CONNECTED -> {
                             ConnectionIndicator(status = ConnectionStatus.CONNECTED)
+                            TextButton(onClick = { viewModel.checkGatewayConnection() }) {
+                                Text("重测")
+                            }
                         }
                         ConnectionStatusUI.ERROR -> {
                             ConnectionIndicator(status = ConnectionStatus.DISCONNECTED)
+                            TextButton(onClick = { viewModel.checkGatewayConnection() }) {
+                                Text("重试")
+                            }
                         }
                         else -> {
                             TextButton(onClick = { viewModel.checkGatewayConnection() }) {
@@ -206,7 +220,7 @@ fun SettingsScreen(
         item {
             SettingsCard(
                 title = "关于",
-                subtitle = "LocalFile v1.0.0",
+                subtitle = "LocalFile v" + com.localmind.localfile.BuildConfig.VERSION_NAME,
                 icon = Icons.Default.Info
             )
         }

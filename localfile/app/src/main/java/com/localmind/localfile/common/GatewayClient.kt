@@ -1,6 +1,8 @@
 package com.localmind.localfile.common
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -31,6 +33,47 @@ class GatewayClient(
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    /**
+     * 真实连通性检测：用给定 key 发一个极小的请求。
+     * 成功返回 ok=true；401/402/网络错误都会返回具体原因。
+     */
+    suspend fun ping(token: String): PingResult = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext PingResult(false, "未填写 API Key")
+        try {
+            val body = JSONObject().apply {
+                put("model", DeepSeekConfig.MODEL)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", "hi")
+                    })
+                })
+                put("max_tokens", 1)
+            }
+            val request = Request.Builder()
+                .url("$baseUrl/chat/completions")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Authorization", "Bearer $token")
+                .post(body.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            client.newCall(request).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    PingResult(true, "连接正常")
+                } else {
+                    val text = resp.body?.string().orEmpty()
+                    val msg = try {
+                        JSONObject(text).optJSONObject("error")?.optString("message") ?: text.take(200)
+                    } catch (_: Exception) { text.take(200) }
+                    Logger.w("ping failed ${resp.code}: $msg")
+                    PingResult(false, "HTTP ${resp.code}：$msg")
+                }
+            }
+        } catch (e: Exception) {
+            PingResult(false, e.message ?: "网络错误")
+        }
+    }
 
     suspend fun chatCompletion(
         messages: List<ChatMessage>,
@@ -146,7 +189,8 @@ class GatewayClient(
                                 } else null
                             }
                         }
-                        continuation.resume(ChatResult(content, finishReason, toolCalls))
+                        val usage = TokenUsage.from(json.optJSONObject("usage"))
+                        continuation.resume(ChatResult(content, finishReason, toolCalls, usage))
                     } catch (e: Exception) {
                         if (!continuation.isCancelled) {
                             continuation.resumeWithException(GatewayException("Parse error: ${e.message}", cause = e))
@@ -160,7 +204,8 @@ class GatewayClient(
     fun chatCompletionStream(
         messages: List<ChatMessage>,
         model: String = DeepSeekConfig.MODEL,
-        token: String = DeepSeekConfig.API_KEY
+        token: String = DeepSeekConfig.API_KEY,
+        onUsage: ((TokenUsage) -> Unit)? = null
     ): Flow<String> = callbackFlow {
         // 注意：不能用 put(key, List)——Android 系统精简版 org.json 没有该重载，会 NoSuchMethodError
         val messagesJson = JSONArray().apply {
@@ -170,6 +215,8 @@ class GatewayClient(
             put("model", model)
             put("messages", messagesJson)
             put("stream", true)
+            // 让服务端在最后一个 chunk 里带上精确的 token 用量
+            put("stream_options", JSONObject().apply { put("include_usage", true) })
         }
 
         val request = Request.Builder()
@@ -190,6 +237,10 @@ class GatewayClient(
                 }
                 try {
                     val json = JSONObject(data)
+                    // usage 通常在最后一个 chunk 中（choices 为空数组）
+                    TokenUsage.from(json.optJSONObject("usage"))?.let { u ->
+                        onUsage?.invoke(u)
+                    }
                     val choicesArray = json.optJSONArray("choices")
                     val delta = if (choicesArray != null && choicesArray.length() > 0) {
                         choicesArray.optJSONObject(0)?.optJSONObject("delta")
@@ -225,7 +276,9 @@ data class ChatMessage(
     val content: String,
     val toolCallId: String? = null,
     val name: String? = null,
-    val toolCalls: List<ToolCall>? = null
+    val toolCalls: List<ToolCall>? = null,
+    /** 仅用于 UI 展示的 token 用量，不会序列化进请求体 */
+    val usage: TokenUsage? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("role", role)
@@ -258,5 +311,33 @@ data class ToolCall(
 data class ChatResult(
     val content: String,
     val finishReason: String,
-    val toolCalls: List<ToolCall>? = null
+    val toolCalls: List<ToolCall>? = null,
+    val usage: TokenUsage? = null
 )
+
+/** DeepSeek API 返回的精确 token 用量。 */
+data class TokenUsage(
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val totalTokens: Int,
+    val cacheReadTokens: Int = 0,
+    val cacheWriteTokens: Int = 0,
+    val requests: Int = 1,
+    val toolCalls: Int = 0
+) {
+    companion object {
+        fun from(json: JSONObject?): TokenUsage? {
+            if (json == null || json.isNull("total_tokens")) return null
+            return TokenUsage(
+                inputTokens = json.optInt("prompt_tokens", 0),
+                outputTokens = json.optInt("completion_tokens", 0),
+                totalTokens = json.optInt("total_tokens", 0),
+                cacheReadTokens = json.optInt("prompt_cache_hit_tokens", 0),
+                cacheWriteTokens = json.optInt("prompt_cache_miss_tokens", 0)
+            )
+        }
+    }
+}
+
+/** 连通性探测结果。 */
+data class PingResult(val ok: Boolean, val message: String)

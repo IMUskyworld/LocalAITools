@@ -22,6 +22,8 @@ data class MessageEntity(
     val content: String,
     val modelName: String = "",
     val speedText: String = "",
+    /** DeepSeek API 返回的精确 token 总数（来自 usage） */
+    val tokenCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )
 

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.localmind.localfile.model.DeviceDetector
 import com.localmind.localfile.model.DeviceSpecs
 import com.localmind.localfile.model.DeviceTier
+import com.localmind.localfile.common.DeepSeekConfig
 import com.localmind.localfile.storage.PreferencesManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,7 @@ data class SettingsUiState(
     val conclusionText: String = "",
     val themeMode: String = "system", // "light", "dark", "system"
     val gatewayStatus: ConnectionStatusUI = ConnectionStatusUI.UNKNOWN,
+    val gatewayError: String? = null,
     val apiKey: String = "",
     val apiKeySaved: Boolean = false,
     val isChecking: Boolean = true,
@@ -86,15 +88,36 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * 真实检测 DeepSeek 连接：用当前 key 发一个 1-token 的请求。
+     * 之前这里是 delay(1500) 后固定显示"已连接"的假实现。
+     */
     fun checkGatewayConnection() {
         viewModelScope.launch {
-            _state.update { it.copy(gatewayStatus = ConnectionStatusUI.UNKNOWN) }
+            _state.update { it.copy(gatewayStatus = ConnectionStatusUI.UNKNOWN, gatewayError = null) }
+            val key = DeepSeekConfig.API_KEY
+            if (key.isBlank()) {
+                _state.update {
+                    it.copy(
+                        gatewayStatus = ConnectionStatusUI.ERROR,
+                        gatewayError = "未填写 API Key",
+                    )
+                }
+                return@launch
+            }
             try {
-                // In a real app, ping the gateway
-                kotlinx.coroutines.delay(1500)
-                _state.update { it.copy(gatewayStatus = ConnectionStatusUI.CONNECTED) }
+                val result = com.localmind.localfile.common.GatewayClient().ping(key)
+                if (result.ok) {
+                    _state.update { it.copy(gatewayStatus = ConnectionStatusUI.CONNECTED, gatewayError = null) }
+                } else {
+                    _state.update {
+                        it.copy(gatewayStatus = ConnectionStatusUI.ERROR, gatewayError = result.message)
+                    }
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(gatewayStatus = ConnectionStatusUI.ERROR) }
+                _state.update {
+                    it.copy(gatewayStatus = ConnectionStatusUI.ERROR, gatewayError = e.message ?: "连接失败")
+                }
             }
         }
     }
