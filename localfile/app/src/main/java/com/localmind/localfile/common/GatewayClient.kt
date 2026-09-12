@@ -67,10 +67,15 @@ class GatewayClient(
                     try {
                         val json = JSONObject(data)
                         val choicesArray = json.optJSONArray("choices")
-                        val content = if (choicesArray != null && choicesArray.length() > 0) {
-                            choicesArray.optJSONObject(0)?.optJSONObject("delta")?.optString("content", "") ?: ""
+                        val delta = if (choicesArray != null && choicesArray.length() > 0) {
+                            choicesArray.optJSONObject(0)?.optJSONObject("delta")
+                        } else null
+                        // 注意：推理模型的 delta 里 content 可能是 JSON null，
+                        // org.json 的 optString 会把 JSONObject.NULL 转成字符串 "null"，
+                        // 必须先判 isNull 再取值，否则回复开头会出现一串 "null"。
+                        val content = if (delta != null && !delta.isNull("content")) {
+                            delta.optString("content", "")
                         } else ""
-                        if (content.isNotEmpty()) onStream(content)
                     } catch (e: Exception) {
                         Logger.w("SSE parse error: ${e.message}")
                     }
@@ -121,7 +126,9 @@ class GatewayClient(
                         val message = if (choicesArray != null && choicesArray.length() > 0) {
                             choicesArray.optJSONObject(0)?.optJSONObject("message")
                         } else null
-                        val content = message?.optString("content", "") ?: ""
+                        val content = if (message != null && !message.isNull("content")) {
+                            message.optString("content", "")
+                        } else ""
                         val finishReason = if (choicesArray != null && choicesArray.length() > 0) {
                             choicesArray.optJSONObject(0)?.optString("finish_reason", "") ?: ""
                         } else ""
@@ -184,8 +191,11 @@ class GatewayClient(
                 try {
                     val json = JSONObject(data)
                     val choicesArray = json.optJSONArray("choices")
-                    val content = if (choicesArray != null && choicesArray.length() > 0) {
-                        choicesArray.optJSONObject(0)?.optJSONObject("delta")?.optString("content", "") ?: ""
+                    val delta = if (choicesArray != null && choicesArray.length() > 0) {
+                        choicesArray.optJSONObject(0)?.optJSONObject("delta")
+                    } else null
+                    val content = if (delta != null && !delta.isNull("content")) {
+                        delta.optString("content", "")
                     } else ""
                     if (content.isNotEmpty()) trySend(content)
                 } catch (e: Exception) {

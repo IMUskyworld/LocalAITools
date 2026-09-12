@@ -2,6 +2,9 @@
 ; Build: makensis installer.nsi
 ; Produces: LocalMindSetup.exe
 ; Installs LocalMind.exe + scripts\make_doc.exe to %LOCALAPPDATA%\LocalMind
+;
+; 重要：本安装包【不再内置任何 API Key】。
+; 用户首次启动后在「设置」页填写自己的 DeepSeek API Key（保存到 auth.json）。
 
 Unicode true
 !include "MUI2.nsh"
@@ -10,20 +13,10 @@ Unicode true
 
 ; ---------- Product info ----------
 !define APP_NAME "LocalMind"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "0.3.0"
 !define APP_ID "com.localmind.app"
 !define INSTALL_DIR "$LOCALAPPDATA\LocalMind"
-
-; ---------- DeepSeek API key（随包分发，开箱即用）----------
-; 说明：Rust 端 deepseek_api_key() 优先读运行时环境变量 LOCALMIND_DEEPSEEK_KEY，
-; 未设置才回退编译期烘焙值。这里在安装时写入「用户环境变量」，
-; 因此无需重新编译 Rust 即可让任何机器装完即用。
-; 安全警示：此 key 以明文编入安装包，任何拿到 LocalMindSetup.exe 的人都可提取。
-; 请仅使用低额度备用 key；若需更换，改这一行后重新执行 build-installer.ps1 即可。
-; 若本文件会 push 到公开仓库，请先作废该 key。
-!ifndef DEEPSEEK_KEY
-  !define DEEPSEEK_KEY "sk-ee34da1ded9c46cdb920b43e45fa3a0a"
-!endif
+!define DATA_DIR "$APPDATA\LocalMind"
 
 !ifndef STAGE_DIR
   !define STAGE_DIR "..\LocalMindSetupBuild"
@@ -45,8 +38,6 @@ CRCCheck on
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 
-; 完成页「立即运行」：安装进程已注入 LOCALMIND_DEEPSEEK_KEY 环境变量，
-; 由此启动的 LocalMind 会继承它，装完即可直接对话。
 !define MUI_FINISHPAGE_RUN "$INSTDIR\LocalMind.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "立即运行 LocalMind"
 !insertmacro MUI_PAGE_FINISH
@@ -59,6 +50,14 @@ CRCCheck on
 
 ; ---------- Install ----------
 Section "Install" SecMain
+    ; ---- 每次安装都从干净状态开始（用户要求：安装后创建新的记忆文档）----
+    ; 清理上一次安装残留的会话/记忆/API Key 配置，避免旧数据污染新版本
+    Delete "${DATA_DIR}\auth.json"
+    Delete "${DATA_DIR}\localmind.db"
+    Delete "${DATA_DIR}\localmind.db-wal"
+    Delete "${DATA_DIR}\localmind.db-shm"
+    RMDir /r "${DATA_DIR}\traces"
+
     SetOutPath "${INSTALL_DIR}"
 
     ; Main executable
@@ -69,20 +68,13 @@ Section "Install" SecMain
     File "${STAGE_DIR}\scripts\make_doc.exe"
 
     ; Pydantic AI Agent service (onedir - recursive)
-    ; 装在 scripts\localmind-agent 下，命中 find_agent_exe 的 scripts/ 候选路径
     SetOutPath "${INSTALL_DIR}\scripts\localmind-agent"
     File /r "${STAGE_DIR}\scripts\localmind-agent\*.*"
 
-    ; ---- 注入 DeepSeek key（三重保险，确保任何启动方式都读得到）----
-    ; 1) 写入用户级环境变量：永久生效，重启/重登录后所有进程均可见
-    WriteRegExpandStr HKCU "Environment" "LOCALMIND_DEEPSEEK_KEY" "${DEEPSEEK_KEY}"
-
-    ; 2) 广播 WM_WININICHANGE：通知 Explorer 等已运行进程刷新环境，
-    ;    这样从桌面 / 开始菜单快捷方式启动也能立刻读到，无需注销
+    ; ---- 清理历史版本写入的环境变量（旧安装包曾把 key 写进注册表）----
+    ; 现在改为用户在设置页自填，安装包不再注入任何 key。
+    DeleteRegValue HKCU "Environment" "LOCALMIND_DEEPSEEK_KEY"
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-
-    ; 3) 设置安装进程自身环境：完成页「立即运行」启动的 LocalMind 直接继承
-    System::Call 'kernel32::SetEnvironmentVariable(t "LOCALMIND_DEEPSEEK_KEY", t "${DEEPSEEK_KEY}")'
 
     ; Shortcuts
     SetOutPath "${INSTALL_DIR}"
@@ -118,7 +110,16 @@ Section "Uninstall"
     Delete "${INSTALL_DIR}\uninstall.exe"
     RMDir "${INSTALL_DIR}"
 
-    ; Remove the injected API key (卸载时不残留凭证)
+    ; ---- 删除应用数据（记忆文档 / 会话 / API key 配置）----
+    ; auth.json、localmind.db（Session/Message/Memory 落库）、traces/
+    Delete "${DATA_DIR}\auth.json"
+    Delete "${DATA_DIR}\localmind.db"
+    Delete "${DATA_DIR}\localmind.db-wal"
+    Delete "${DATA_DIR}\localmind.db-shm"
+    RMDir /r "${DATA_DIR}\traces"
+    RMDir "${DATA_DIR}"
+
+    ; Remove the legacy injected API key from environment (历史的旧安装包写过)
     DeleteRegValue HKCU "Environment" "LOCALMIND_DEEPSEEK_KEY"
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 

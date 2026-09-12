@@ -38,7 +38,7 @@
 
 ## 关键决策（ADR 摘要）
 
-1. **API key 经环境变量注入 + 构建期烘焙**：优先级 = 运行时环境变量 `LOCALMIND_DEEPSEEK_KEY` > 编译期 `option_env!("LOCALMIND_DEEPSEEK_KEY")`（构建时注入，使打包出的 exe 开箱即用）。源码/仓库不存明文 key。⚠️ 烘焙后 key 可从安装包提取，适用于低额度/备用 key，勿用主账号高额度 key。
+1. **API key 用户自填（v0.3.0 起）**：安装包不内置任何 key；用户在设置页填写后写入 `%APPDATA%\LocalMind\auth.json`（明文 JSON，便于排查）。优先级 = 前端传入的 `body.token` > 环境变量 `LOCALMIND_DEEPSEEK_KEY`（仅供开发调试）。安装/卸载会自动清理历史遗留的 `LOCALMIND_DEEPSEEK_KEY` 环境变量。⚠️ 历史坑：旧安装包曾把 key 硬编码进 installer.nsi 并写入 HKCU\Environment，导致换 key 后仍用旧 key。
 2. **Relay-first 已重新立项（ADR-002）**：双端默认通过自建 WSS Relay 出站连接，不要求普通用户安装 Tailscale。Relay 只负责设备 token、配对、幂等转发、离线队列和状态；Windows 本机权限、确认和审计仍是最终授权边界。旧 RelayCloud 三组件、new-api 网关和公网裸端口仍不复活。
 3. **Agent 工具在 Python 侧实现**（agent_server.py），不依赖 Rust IPC——新增工具 = 改 Python + 重新打包 localmind-agent。
 4. **安全红线**：`run_command`、任意 Shell/executable 和远程任意命令永久禁止暴露给 Agent；`delete_path` 在完成 Permission Gateway、备份、审计和 Undo 前不得开放。
@@ -54,7 +54,7 @@
 - **NSIS**：`C:\Users\world\AppData\Local\tauri\nsis-3.11\Bin\makensis.exe`
 - 构建命令：`build-localmind.ps1` → `build-installer.ps1`（脚本默认路径可用 `LOCALMIND_*` 环境变量覆盖）
 - Agent 重新打包：`localmind\scripts\build\agent-venv\Scripts\python.exe localmind\scripts\pack_agent_exe.py`（venv 只装 pydantic-ai-slim[openai] + pyinstaller）
-- **key 烘焙**：build-localmind.ps1 会从用户环境变量读 LOCALMIND_DEEPSEEK_KEY 并在构建期注入（option_env!），打包出的 LocalMind.exe 开箱即用；源码不含明文 key。build-localmind.ps1 / build-installer.ps1 已改为相对 PSScriptRoot 的路径，NSIS 通过 -DSTAGE_DIR 传暂存目录。
+- **key 存储**：`auth.json` 位于 `%APPDATA%\LocalMind\auth.json`（明文 JSON，字段 `deepseek_api_key`）。Rust `storage::get_api_key/set_api_key` 读写此文件；前端 `runAgent` 把它放进 `body.token` 传给 Python agent。**构建脚本不需要任何 key**。
 
-- **Android 打包必须注入 key**：`localfile` 的 key 取 gradle 属性 `LOCAL_FILE_API_KEY` > 环境变量 `LOCAL_FILE_API_KEY` > 环境变量 `LOCALMIND_DEEPSEEK_KEY`；三者都没有时 BuildConfig 里是中文占位符——**APK 表面正常但在线功能全废**，发布前务必确认（可用 dex 搜 `sk-` 验证）。
-- DeepSeek key 已配置为用户环境变量 `LOCALMIND_DEEPSEEK_KEY`（本地测试 key 勿外泄）
+- **Android 也是用户自填 key**：`localfile` 的 `BuildConfig.DEEPSEEK_API_KEY` 固定为空字符串，用户在设置页填写后存 DataStore 并写入 `DeepSeekConfig.API_KEY`。APK 内不应出现任何 `sk-` 字符串（可用 dex 搜 `sk-` 验证）。
+- **卸载会清理数据**：`installer.nsi` 的 Uninstall 段会删除 `%APPDATA%\LocalMind`（auth.json / localmind.db / traces），即『卸载软件自动删除记忆文档』。
