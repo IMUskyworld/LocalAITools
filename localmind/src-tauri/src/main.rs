@@ -8,6 +8,7 @@ mod files;
 mod inference;
 mod model;
 mod relay_http;
+mod relay_wss;
 mod storage;
 mod tools;
 
@@ -56,6 +57,7 @@ async fn main() {
             chat_api::save_memory,
             chat_api::delete_memory,
             chat_api::search_memories,
+            relay_wss::send_relay_state,
             chat_api::turn_begin,
             chat_api::turn_complete,
             chat_api::turn_fail,

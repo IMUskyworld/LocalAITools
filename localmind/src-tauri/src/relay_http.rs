@@ -28,7 +28,7 @@ pub struct RelayHttpResponse {
     pub body: String,
 }
 
-fn build_client() -> Result<reqwest::Client, String> {
+pub fn build_client() -> Result<reqwest::Client, String> {
     let certificate = reqwest::Certificate::from_pem(RELAY_CA_PEM)
         .map_err(|e| format!("内置 Relay 根证书无法解析: {e}"))?;
 
