@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +19,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.localmind.localfile.ui.account.AccountScreen
+import com.localmind.localfile.ui.remote.RemoteControlScreen
 import com.localmind.localfile.ui.chat.ChatScreen
 import com.localmind.localfile.ui.settings.SettingsScreen
 
@@ -25,9 +27,10 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Chat : Screen("chat", "聊天", Icons.Default.Chat)
     data object Account : Screen("account", "账号", Icons.Default.Person)
     data object Settings : Screen("settings", "设置", Icons.Default.Settings)
+    data object Remote : Screen("remote", "远控", Icons.Default.Computer)
 }
 
-private val bottomNavItems = listOf(Screen.Chat, Screen.Account, Screen.Settings)
+private val bottomNavItems = listOf(Screen.Chat, Screen.Remote, Screen.Account, Screen.Settings)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +76,7 @@ fun LocalFileApp() {
             composable(Screen.Chat.route) { ChatScreen() }
             composable(Screen.Account.route) { AccountScreen() }
             composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Remote.route) { RemoteControlScreen() }
         }
     }
 }
