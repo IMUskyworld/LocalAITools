@@ -57,6 +57,7 @@ async fn main() {
             chat_api::save_memory,
             chat_api::delete_memory,
             chat_api::search_memories,
+            relay_wss::connect_relay_wss,
             relay_wss::send_relay_state,
             chat_api::turn_begin,
             chat_api::turn_complete,

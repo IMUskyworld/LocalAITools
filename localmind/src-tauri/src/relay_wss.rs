@@ -228,6 +228,17 @@ pub async fn start_relay_wss(
     })
 }
 
+/// 启动 Relay WSS 连接（前端在 App 加载时调用）。
+#[tauri::command]
+pub async fn connect_relay_wss(
+    app_handle: tauri::AppHandle,
+    base_url: String,
+    device_id: String,
+    device_token: String,
+) -> Result<(), String> {
+    start_relay_wss(app_handle, base_url, device_id, device_token).await?;
+    Ok(())
+}
 /// 发送状态回传到 Relay（如 running / done / failed）。
 #[tauri::command]
 pub async fn send_relay_state(

@@ -1,4 +1,5 @@
-﻿import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
+import { startRelayListener, stopRelayListener } from './api/relayManager';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ChatPage from './pages/ChatPage';
@@ -7,6 +8,12 @@ import SettingsPage from './pages/SettingsPage';
 import AccountPage from './pages/AccountPage';
 
 function App() {
+  useEffect(() => {
+    // 启动 Relay WSS 连接（游客模式自动跳过）
+    startRelayListener();
+    return () => stopRelayListener();
+  }, []);
+
   useEffect(() => {
     const savedTheme = localStorage.getItem('localmind-theme') || 'light';
 
