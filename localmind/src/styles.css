@@ -2352,6 +2352,43 @@ input, textarea, select {
   align-self: flex-end;
 }
 .btn-primary:hover { filter: brightness(1.1); }
+
+.tool-call-card {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  margin: 8px 0;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+.tool-call-card.tool-success { border-left: 3px solid #4caf50; }
+.tool-call-card.tool-failed { border-left: 3px solid #e74c3c; }
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--surface-variant, #f5f5f5);
+  user-select: none;
+}
+.tool-call-header:hover { filter: brightness(0.97); }
+.tool-call-icon { font-size: 1rem; }
+.tool-call-name { font-weight: 600; flex: 1; }
+.tool-call-toggle { font-size: 0.7rem; color: var(--text-secondary, #888); }
+.tool-call-detail { padding: 10px 14px; border-top: 1px solid var(--border, #eee); }
+.tool-call-section { margin-bottom: 8px; }
+.tool-call-label { font-size: 0.75rem; color: var(--text-secondary, #888); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tool-call-args, .tool-call-result {
+  background: var(--code-bg, #f8f8f8);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .settings-warning {
   font-size: 0.82rem;
@@ -3095,6 +3132,43 @@ input, textarea, select {
   align-self: flex-end;
 }
 .btn-primary:hover { filter: brightness(1.1); }
+
+.tool-call-card {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  margin: 8px 0;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+.tool-call-card.tool-success { border-left: 3px solid #4caf50; }
+.tool-call-card.tool-failed { border-left: 3px solid #e74c3c; }
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--surface-variant, #f5f5f5);
+  user-select: none;
+}
+.tool-call-header:hover { filter: brightness(0.97); }
+.tool-call-icon { font-size: 1rem; }
+.tool-call-name { font-weight: 600; flex: 1; }
+.tool-call-toggle { font-size: 0.7rem; color: var(--text-secondary, #888); }
+.tool-call-detail { padding: 10px 14px; border-top: 1px solid var(--border, #eee); }
+.tool-call-section { margin-bottom: 8px; }
+.tool-call-label { font-size: 0.75rem; color: var(--text-secondary, #888); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tool-call-args, .tool-call-result {
+  background: var(--code-bg, #f8f8f8);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .settings-warning {
   font-size: 0.82rem;
