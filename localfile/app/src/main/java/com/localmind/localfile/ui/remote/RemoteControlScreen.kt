@@ -59,7 +59,7 @@ fun RemoteControlScreen(
             }
         }
 
-        if (state.devices.isEmpty()) {
+        if (state.targets.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -84,18 +84,62 @@ fun RemoteControlScreen(
                 }
             }
         } else {
-            items(state.devices) { device ->
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = if (device.id == state.selectedDeviceId) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(16.dp), onClick = { viewModel.selectDevice(device.id) }) {
+            items(state.targets) { target ->
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = if (target.targetDeviceId == state.selectedTargetId) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(16.dp), onClick = { viewModel.selectTarget(target.targetDeviceId) }) {
                     Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column { Text(device.deviceName, fontWeight = FontWeight.Medium); Text(device.platform, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) }
+                        Column {
+                            Text(target.deviceName, fontWeight = FontWeight.Medium)
+                            Text("windows", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        }
                     }
                 }
             }
         }
 
-        if (state.selectedDeviceId != null) {
+        // 可申请远控的电脑（已登记但还没建立控制配对）
+        if (state.requestable.isNotEmpty()) {
+            item {
+                Text(
+                    "可申请远控的电脑",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            items(state.requestable) { target ->
+                val pending = state.pendingRequestDeviceIds.contains(target.targetDeviceId)
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(target.deviceName, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (pending) "等待电脑端确认…" else "尚未授权远控",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        if (!pending) {
+                            TextButton(onClick = { viewModel.requestControl(target.targetDeviceId) }) {
+                                Text("申请远控")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.selectedTargetId != null) {
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {

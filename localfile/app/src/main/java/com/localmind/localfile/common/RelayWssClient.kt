@@ -41,6 +41,11 @@ class RelayWssClient(
         onStateUpdate: (StateUpdate) -> Unit,
         onConnected: () -> Unit,
         onError: (String) -> Unit,
+        /**
+         * Relay 路由必需：控制配对的 tenant_id。
+         * 不传的话 Relay 的 route_between() 找不到配对，会直接返回"设备未配对"。
+         */
+        tenantId: String,
         /** 重试时必须复用同一个 command_id，Relay 侧据此幂等去重，避免重复执行 */
         commandId: String = java.util.UUID.randomUUID().toString()
     ) {
@@ -62,6 +67,7 @@ class RelayWssClient(
                     put("type", "command")
                     put("from_device_id", deviceId)
                     put("to_device_id", targetDeviceId)
+                    put("tenant_id", tenantId)
                     put("action_type", "chat_task")
                     put("intent_text", intentText)
                     put("command_id", commandId)
@@ -74,6 +80,13 @@ class RelayWssClient(
                 try {
                     val json = JSONObject(text)
                     val type = json.optString("type")
+                    if (type == "error") {
+                        // Relay 拒绝转发时的原因（未配对 / 权限不足 / 信封非法）
+                        val code = json.optString("error_code")
+                        val msg = json.optString("message")
+                        onError("Relay 拒绝：" + (msg.ifEmpty { code }))
+                        return
+                    }
                     if (type == "ack" || type == "state") {
                         val cmdId = json.optString("command_id")
                         val state = json.optString("state", "unknown")

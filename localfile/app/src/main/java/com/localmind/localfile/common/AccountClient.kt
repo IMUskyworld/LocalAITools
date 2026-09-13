@@ -38,6 +38,38 @@ data class RelayAccountDevice(
     val lastSeen: Long
 )
 
+/**
+ * 一条已建立的控制配对。
+ *
+ * tenant_id 是 Relay 做路由的必要字段：发命令和回状态时都必须带上，
+ * 否则 Relay 会判定"设备未配对"并拒绝转发。
+ */
+data class RelayControlPairing(
+    val tenantId: String,
+    val controllerDeviceId: String,
+    val targetDeviceId: String,
+    val permissions: List<String>,
+    val approvedAt: Long
+) {
+    /** 本机是否是控制方（手机控电脑时本机应为 controller） */
+    fun isController(myDeviceId: String): Boolean = controllerDeviceId == myDeviceId
+
+    /** 从本机角度看的目标设备 id */
+    fun peerDeviceId(myDeviceId: String): String =
+        if (controllerDeviceId == myDeviceId) targetDeviceId else controllerDeviceId
+}
+
+/** 一条待处理/已处理的控制授权请求。 */
+data class RelayPairingRequest(
+    val id: String,
+    val requesterDeviceId: String,
+    val targetDeviceId: String,
+    val permissions: List<String>,
+    val status: String,
+    val createdAt: Long,
+    val expiresAt: Long
+)
+
 class AccountApiException(
     message: String,
     val code: String,
@@ -159,6 +191,98 @@ class AccountClient(
             }
         }
 
+    /** 手机端发起控制授权申请（需要目标电脑本机批准）。 */
+    suspend fun createPairingRequest(
+        accessToken: String,
+        deviceId: String,
+        deviceToken: String,
+        targetDeviceId: String,
+        permissions: List<String> = listOf("chat_task")
+    ): RelayPairingRequest = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply {
+            put("target_device_id", targetDeviceId)
+            put("permissions", JSONArray().apply { permissions.forEach { put(it) } })
+        }
+        val request = Request.Builder()
+            .url("$baseUrl/v1/control/pairing-requests")
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Device-Token", deviceToken)
+            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        parsePairingRequest(JSONObject(executeRaw(request)))
+    }
+
+    /** 目标电脑端拉取待处理的控制授权请求。 */
+    suspend fun listPairingRequests(
+        accessToken: String,
+        deviceId: String,
+        deviceToken: String
+    ): List<RelayPairingRequest> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/v1/control/pairing-requests")
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Device-Token", deviceToken)
+            .get()
+            .build()
+        val array = JSONArray(executeRaw(request))
+        buildList {
+            for (index in 0 until array.length()) add(parsePairingRequest(array.getJSONObject(index)))
+        }
+    }
+
+    suspend fun approvePairingRequest(
+        accessToken: String,
+        deviceId: String,
+        deviceToken: String,
+        requestId: String
+    ): RelayControlPairing = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/v1/control/pairing-requests/${encodePath(requestId)}/approve")
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Device-Token", deviceToken)
+            .post(EMPTY_BODY)
+            .build()
+        parsePairing(JSONObject(executeRaw(request)))
+    }
+
+    suspend fun rejectPairingRequest(
+        accessToken: String,
+        deviceId: String,
+        deviceToken: String,
+        requestId: String
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/v1/control/pairing-requests/${encodePath(requestId)}/reject")
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Device-Token", deviceToken)
+            .post(EMPTY_BODY)
+            .build()
+        execute(request, expectJson = false)
+    }
+
+    /** 拉取本机参与的所有控制配对（Relay 需要 tenant_id 才能路由命令）。 */
+    suspend fun listControlPairings(
+        accessToken: String,
+        deviceId: String,
+        deviceToken: String
+    ): List<RelayControlPairing> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/v1/control/pairings")
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Device-Token", deviceToken)
+            .get()
+            .build()
+        val array = JSONArray(executeRaw(request))
+        buildList {
+            for (index in 0 until array.length()) add(parsePairing(array.getJSONObject(index)))
+        }
+    }
+
     suspend fun removeDevice(
         accessToken: String,
         deviceId: String,
@@ -230,6 +354,36 @@ class AccountClient(
         osVersion = json.optString("os_version"),
         lastSeen = json.optLong("last_seen")
     )
+
+    private fun parsePairing(json: JSONObject): RelayControlPairing {
+        val perms = mutableListOf<String>()
+        json.optJSONArray("permissions")?.let { arr ->
+            for (i in 0 until arr.length()) perms.add(arr.optString(i))
+        }
+        return RelayControlPairing(
+            tenantId = json.optString("tenant_id"),
+            controllerDeviceId = json.optString("controller_device_id"),
+            targetDeviceId = json.optString("target_device_id"),
+            permissions = perms,
+            approvedAt = json.optLong("approved_at")
+        )
+    }
+
+    private fun parsePairingRequest(json: JSONObject): RelayPairingRequest {
+        val perms = mutableListOf<String>()
+        json.optJSONArray("permissions")?.let { arr ->
+            for (i in 0 until arr.length()) perms.add(arr.optString(i))
+        }
+        return RelayPairingRequest(
+            id = json.optString("id"),
+            requesterDeviceId = json.optString("requester_device_id"),
+            targetDeviceId = json.optString("target_device_id"),
+            permissions = perms,
+            status = json.optString("status"),
+            createdAt = json.optLong("created_at"),
+            expiresAt = json.optLong("expires_at")
+        )
+    }
 
     private fun encodePath(value: String): String = java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
 

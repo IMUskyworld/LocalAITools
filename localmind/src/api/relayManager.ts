@@ -76,6 +76,9 @@ export async function startRelayListener(): Promise<void> {
     const intentText = env.intent_text || '(empty)';
     const commandId = env.command_id || env.id;
     const fromDeviceId = env.from_device_id;
+    // Relay 用 tenant_id 做路由校验，回传状态时必须原样带上，
+    // 否则 process_state -> ensure_pair_route 会因"设备未配对"被拒。
+    const tenantId = env.tenant_id;
 
     // 发送 Windows 系统通知
     try {
@@ -103,6 +106,7 @@ export async function startRelayListener(): Promise<void> {
         deviceId: device.device_id,
         deviceToken: device.device_token,
         toDeviceId: fromDeviceId,
+        tenantId,
         commandId,
         stateValue: 'running',
       });
@@ -136,6 +140,7 @@ export async function startRelayListener(): Promise<void> {
         deviceId: device.device_id,
         deviceToken: device.device_token,
         toDeviceId: fromDeviceId,
+        tenantId,
         commandId,
         stateValue: 'done',
         resultText: result.content.substring(0, 10000),
@@ -158,6 +163,7 @@ export async function startRelayListener(): Promise<void> {
           deviceId: device.device_id,
           deviceToken: device.device_token,
           toDeviceId: fromDeviceId,
+          tenantId,
           commandId,
           stateValue: 'failed',
           resultText: errorMsg,

@@ -9,6 +9,7 @@ export default function AccountPage() {
     status,
     user,
     devices,
+    pairingRequests,
     initialized,
     busy,
     error,
@@ -18,6 +19,9 @@ export default function AccountPage() {
     logout,
     refreshDevices,
     removeDevice,
+    refreshPairingRequests,
+    approvePairing,
+    rejectPairing,
     clearError,
   } = useAccountStore();
   const [mode, setMode] = useState<Mode>('login');
@@ -31,6 +35,13 @@ export default function AccountPage() {
   useEffect(() => {
     void initialize();
   }, [initialize]);
+
+  // 已登录时拉取「待本机批准的控制授权申请」
+  useEffect(() => {
+    if (status === 'authenticated') {
+      void refreshPairingRequests();
+    }
+  }, [status, refreshPairingRequests]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -171,6 +182,45 @@ export default function AccountPage() {
               退出登录
             </button>
           </section>
+
+          {pairingRequests.length > 0 && (
+            <section className="account-card account-devices-card">
+              <div className="account-section-title">
+                <div>
+                  <h2>待批准的授权申请</h2>
+                  <p>以下设备请求控制这台电脑。批准后对方才能下发任务；拒绝则不会建立任何权限。</p>
+                </div>
+                <button className="account-secondary" onClick={() => void refreshPairingRequests()} disabled={busy}>
+                  刷新
+                </button>
+              </div>
+              <div className="account-device-list">
+                {pairingRequests.map((req) => (
+                  <div className="account-device" key={req.id}>
+                    <span className="account-device-icon">?</span>
+                    <div className="account-device-copy">
+                      <strong>{req.requester_device_id.slice(0, 8)}…</strong>
+                      <small>申请权限：{req.permissions.join('、') || '（默认）'}</small>
+                    </div>
+                    <button
+                      className="account-secondary"
+                      onClick={() => void approvePairing(req.id)}
+                      disabled={busy}
+                    >
+                      批准
+                    </button>
+                    <button
+                      className="account-remove"
+                      onClick={() => void rejectPairing(req.id)}
+                      disabled={busy}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="account-card account-devices-card">
             <div className="account-section-title">

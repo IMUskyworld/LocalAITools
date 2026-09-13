@@ -346,5 +346,9 @@ fn is_supported_control_permission(permission: &str) -> bool {
             | "doc.create"
             | "file.write"
             | "file.move"
+            // 远控的核心能力：让目标电脑上的 Agent 执行一条自然语言任务。
+            // 之前漏了这一条，导致手机端发起的控制配对请求被 402002 拒绝，
+            // 即使配对成功，ensure_pair_route 也会因 action_type 不在权限列表里而拒绝转发。
+            | "chat_task"
     )
 }

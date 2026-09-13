@@ -2,16 +2,20 @@ import { create } from 'zustand';
 import {
   AccountDevice,
   AccountUser,
+  PairingRequest,
   RelayApiError,
+  approvePairingRequest,
   claimCurrentDevice,
   clearStoredAuth,
   fetchCurrentUser,
   getStoredAuth,
   listAccountDevices,
+  listPairingRequests,
   loginAccount,
   logoutAccount,
   refreshAccount,
   registerAccount,
+  rejectPairingRequest,
   removeAccountDevice,
   storeAuth,
 } from '@/api/account';
@@ -23,6 +27,8 @@ interface AccountState {
   status: AccountStatus;
   user: AccountUser | null;
   devices: AccountDevice[];
+  /** 待本机批准的控制授权申请（别的设备想控制这台电脑） */
+  pairingRequests: PairingRequest[];
   initialized: boolean;
   busy: boolean;
   error: string | null;
@@ -32,6 +38,9 @@ interface AccountState {
   logout: () => Promise<void>;
   refreshDevices: () => Promise<void>;
   removeDevice: (deviceId: string) => Promise<void>;
+  refreshPairingRequests: () => Promise<void>;
+  approvePairing: (requestId: string) => Promise<void>;
+  rejectPairing: (requestId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -39,6 +48,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   status: 'guest',
   user: null,
   devices: [],
+  pairingRequests: [],
   initialized: false,
   busy: false,
   error: null,
@@ -150,6 +160,52 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     try {
       const devices = await listAccountDevices(stored.tokens.access_token);
       set({ devices });
+    } catch (error) {
+      set({ error: messageFor(error) });
+      throw error;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /** 拉取待本机批准的控制授权申请。 */
+  refreshPairingRequests: async () => {
+    const stored = getStoredAuth();
+    if (!stored) return;
+    try {
+      const pending = await listPairingRequests(stored.tokens.access_token);
+      set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
+    } catch (error) {
+      // 未配对时 Relay 可能返回空/错误，不打扰用户
+      set({ pairingRequests: [] });
+    }
+  },
+
+  /** 批准授权：从此对方才能向本机下发受控任务。 */
+  approvePairing: async (requestId) => {
+    const stored = getStoredAuth();
+    if (!stored) return;
+    set({ busy: true, error: null });
+    try {
+      await approvePairingRequest(stored.tokens.access_token, requestId);
+      const pending = await listPairingRequests(stored.tokens.access_token);
+      set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
+    } catch (error) {
+      set({ error: messageFor(error) });
+      throw error;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  rejectPairing: async (requestId) => {
+    const stored = getStoredAuth();
+    if (!stored) return;
+    set({ busy: true, error: null });
+    try {
+      await rejectPairingRequest(stored.tokens.access_token, requestId);
+      const pending = await listPairingRequests(stored.tokens.access_token);
+      set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
     } catch (error) {
       set({ error: messageFor(error) });
       throw error;

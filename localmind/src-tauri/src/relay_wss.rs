@@ -246,6 +246,8 @@ pub async fn send_relay_state(
     device_id: String,
     device_token: String,
     to_device_id: String,
+    // Relay 路由必需：控制配对的 tenant_id。缺了它 Relay 会判定"设备未配对"。
+    tenant_id: Option<String>,
     command_id: String,
     state_value: String,
     result_text: Option<String>,
@@ -256,7 +258,7 @@ pub async fn send_relay_state(
         envelope_type: "state".into(),
         from_device_id: device_id,
         to_device_id: Some(to_device_id),
-        tenant_id: None,
+        tenant_id,
         command_id: Some(command_id),
         intent_text: None,
         action_type: None,

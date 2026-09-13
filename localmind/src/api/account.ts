@@ -40,6 +40,27 @@ export interface AccountDevice {
   enrolled_at: number;
 }
 
+/** 待处理的控制授权请求（他机想控制本机）。 */
+export interface PairingRequest {
+  id: string;
+  requester_device_id: string;
+  target_device_id: string;
+  permissions: string[];
+  status: string;
+  created_at: number;
+  expires_at: number;
+}
+
+/** 已建立的控制配对。 */
+export interface ControlPairing {
+  tenant_id: string;
+  controller_device_id: string;
+  target_device_id: string;
+  permissions: string[];
+  created_at: number;
+  approved_at: number;
+}
+
 const RELAY_URL_KEY = 'localmind-relay-url';
 const DEVICE_KEY = 'localmind-relay-device';
 const AUTH_KEY = 'localmind-account-auth';
@@ -144,6 +165,51 @@ export async function logoutAccount(refreshToken: string): Promise<void> {
 
 export async function fetchCurrentUser(accessToken: string): Promise<AccountUser> {
   return relayRequest<AccountUser>('/v1/auth/me', {}, accessToken);
+}
+
+/** 本机作为目标设备，拉取待批准的控制授权请求。 */
+export async function listPairingRequests(accessToken: string): Promise<PairingRequest[]> {
+  const device = await ensureDeviceCredentials();
+  return relayRequest<PairingRequest[]>(
+    '/v1/control/pairing-requests',
+    {
+      headers: {
+        'x-device-id': device.device_id,
+        'x-device-token': device.device_token,
+      },
+    },
+    accessToken,
+  );
+}
+
+export async function approvePairingRequest(accessToken: string, requestId: string): Promise<ControlPairing> {
+  const device = await ensureDeviceCredentials();
+  return relayRequest<ControlPairing>(
+    `/v1/control/pairing-requests/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: 'POST',
+      headers: {
+        'x-device-id': device.device_id,
+        'x-device-token': device.device_token,
+      },
+    },
+    accessToken,
+  );
+}
+
+export async function rejectPairingRequest(accessToken: string, requestId: string): Promise<void> {
+  const device = await ensureDeviceCredentials();
+  await relayRequest<void>(
+    `/v1/control/pairing-requests/${encodeURIComponent(requestId)}/reject`,
+    {
+      method: 'POST',
+      headers: {
+        'x-device-id': device.device_id,
+        'x-device-token': device.device_token,
+      },
+    },
+    accessToken,
+  );
 }
 
 export async function claimCurrentDevice(accessToken: string): Promise<AccountDevice> {

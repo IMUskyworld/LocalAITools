@@ -5,7 +5,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.localmind.localfile.common.AccountClient
 import com.localmind.localfile.common.Logger
-import com.localmind.localfile.common.RelayAccountDevice
 import com.localmind.localfile.common.RelayWssClient
 import com.localmind.localfile.storage.PreferencesManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,9 +22,24 @@ data class CommandHistoryEntry(
     val result: String
 )
 
+/**
+ * 一个可远控的目标（来自已批准的控制配对）。
+ * tenantId 是 Relay 路由命令的必要字段。
+ */
+data class RemoteTarget(
+    val tenantId: String,
+    val targetDeviceId: String,
+    val deviceName: String,
+    val permissions: List<String> = emptyList()
+)
+
 data class RemoteControlUiState(
-    val devices: List<RelayAccountDevice> = emptyList(),
-    val selectedDeviceId: String? = null,
+    val targets: List<RemoteTarget> = emptyList(),
+    /** 账号下已登记、但还没建立控制配对的 Windows 设备（可发起申请） */
+    val requestable: List<RemoteTarget> = emptyList(),
+    /** 已发出申请、等待电脑端确认的设备 id */
+    val pendingRequestDeviceIds: Set<String> = emptySet(),
+    val selectedTargetId: String? = null,
     val commandText: String = "",
     val isSending: Boolean = false,
     val statusMessage: String = "",
@@ -62,7 +76,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             val token = prefs.accountAccessToken.first()
             if (token.isEmpty()) {
                 _state.update {
-                    it.copy(loading = false, devices = emptyList(), error = "尚未登录账号：请先到「账号」页登录")
+                    it.copy(loading = false, targets = emptyList(), error = "尚未登录账号：请先到「账号」页登录")
                 }
                 return@launch
             }
@@ -70,33 +84,92 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             val deviceToken = prefs.deviceToken.first()
             if (deviceId.isEmpty() || deviceToken.isEmpty()) {
                 _state.update {
-                    it.copy(loading = false, devices = emptyList(), error = "本机尚未登记：请到「账号」页刷新一次")
+                    it.copy(loading = false, targets = emptyList(), error = "本机尚未登记：请到「账号」页刷新一次")
                 }
                 return@launch
             }
             try {
-                val devices = accountClient.listDevices(token, deviceId, deviceToken)
-                val windowsDevices = devices.filter { it.platform == "windows" }
+                // 关键：远控列表必须来自「已批准的控制配对」，而不是账号下的所有设备。
+                // 只有控制配对才带 tenant_id，而 Relay 路由命令时必须要它。
+                val pairings = accountClient.listControlPairings(token, deviceId, deviceToken)
+                val myPairings = pairings.filter { it.isController(deviceId) }
+
+                val deviceNames = accountClient.listDevices(token, deviceId, deviceToken)
+                    .associate { it.id to it.deviceName }
+
+                val targets = myPairings.map { p ->
+                    RemoteTarget(
+                        tenantId = p.tenantId,
+                        targetDeviceId = p.peerDeviceId(deviceId),
+                        deviceName = deviceNames[p.peerDeviceId(deviceId)] ?: "已配对设备",
+                        permissions = p.permissions,
+                    )
+                }
+
+                // 还没配对、但可以发起申请的 Windows 设备
+                val pairedIds = myPairings.map { it.peerDeviceId(deviceId) }.toSet()
+                val requestable = accountClient.listDevices(token, deviceId, deviceToken)
+                    .filter { it.platform == "windows" && it.id !in pairedIds }
+                    .map { RemoteTarget(tenantId = "", targetDeviceId = it.id, deviceName = it.deviceName) }
+
+                // 已发出、等待对方确认的申请
+                val pendingIds = try {
+                    accountClient.listPairingRequests(token, deviceId, deviceToken)
+                        .filter { it.status == "pending" && it.requesterDeviceId == deviceId }
+                        .map { it.targetDeviceId }
+                        .toSet()
+                } catch (e: Exception) { emptySet() }
+
                 _state.update {
                     it.copy(
-                        devices = windowsDevices,
+                        targets = targets,
+                        requestable = requestable,
+                        pendingRequestDeviceIds = pendingIds,
                         loading = false,
-                        error = if (windowsDevices.isEmpty()) {
-                            "账号下没有 Windows 设备。请确认电脑端已登录同一账号，并已在本机完成控制授权配对。"
+                        error = if (targets.isEmpty()) {
+                            "还没有可用于远控的电脑。请在电脑端账号页发起/批准一次控制授权配对。"
                         } else null,
                     )
                 }
             } catch (e: Exception) {
                 Logger.e(e)
                 _state.update {
-                    it.copy(loading = false, devices = emptyList(), error = "加载设备失败：${e.message}")
+                    it.copy(loading = false, targets = emptyList(), error = "加载设备失败：${e.message}")
                 }
             }
         }
     }
 
-    fun selectDevice(deviceId: String) {
-        _state.update { it.copy(selectedDeviceId = deviceId, statusMessage = "", statusType = "", resultText = "") }
+    /** 向目标电脑发起控制授权申请，需要对方在本机点"批准"。 */
+    fun requestControl(targetDeviceId: String) {
+        viewModelScope.launch {
+            val token = prefs.accountAccessToken.first()
+            val deviceId = prefs.deviceId.first()
+            val deviceToken = prefs.deviceToken.first()
+            if (token.isEmpty() || deviceId.isEmpty() || deviceToken.isEmpty()) {
+                _state.update { it.copy(error = "请先登录账号并完成设备登记") }
+                return@launch
+            }
+            _state.update { it.copy(loading = true, error = null) }
+            try {
+                accountClient.createPairingRequest(token, deviceId, deviceToken, targetDeviceId)
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        pendingRequestDeviceIds = it.pendingRequestDeviceIds + targetDeviceId,
+                        statusMessage = "已发送授权申请，请在电脑端 LocalMind「账号」页点「批准」",
+                        statusType = "running",
+                    )
+                }
+            } catch (e: Exception) {
+                Logger.e(e)
+                _state.update { it.copy(loading = false, error = "申请失败：${e.message}") }
+            }
+        }
+    }
+
+    fun selectTarget(deviceId: String) {
+        _state.update { it.copy(selectedTargetId = deviceId, statusMessage = "", statusType = "", resultText = "") }
     }
 
     fun updateCommand(text: String) {
@@ -105,9 +178,18 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
 
     fun sendCommand() {
         val currentState = _state.value
-        val targetDeviceId = currentState.selectedDeviceId ?: return
+        val selectedId = currentState.selectedTargetId ?: return
         val intentText = currentState.commandText.trim()
         if (intentText.isEmpty()) return
+
+        // 从选中的目标解析出 tenant_id（Relay 路由必需）与目标设备 id
+        val target = currentState.targets.firstOrNull { it.targetDeviceId == selectedId }
+        if (target == null) {
+            _state.update { it.copy(isSending = false, statusType = "failed", statusMessage = "目标设备无效，请刷新后重试") }
+            return
+        }
+        val targetDeviceId = target.targetDeviceId
+        val tenantId = target.tenantId
 
         viewModelScope.launch {
             _state.update { it.copy(isSending = true, statusMessage = "\u6b63\u5728\u8fde\u63a5...", statusType = "running", resultText = "") }
@@ -143,6 +225,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                     deviceId = deviceId,
                     deviceToken = deviceToken,
                     targetDeviceId = targetDeviceId,
+                    tenantId = tenantId,
                     intentText = intentText,
                     commandId = commandId,
                     onConnected = {
