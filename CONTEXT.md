@@ -20,7 +20,7 @@
 | make_doc | 文档生成器 exe（PPT/Word/Excel/PDF），agent 的 create_doc 底层调用 |
 | AgentServer | `localmind/scripts/agent_server.py`，SSE HTTP 服务，Rust 懒启动 |
 
-## 当前状态（2026-09-11 快照）
+## 当前状态（2026-09-13 快照）
 
 - **开发基线**：`开发计划/开发路线图.md`；Phase 0、Phase 1 已完成并验收通过；Phase 2 Relay 服务端已部署并验证，下一步接入 Windows/Android 客户端。
 - **Harness v2 已默认为生产路径**：结构化工具错误、单 Turn 重复调用拦截、请求/工具预算、单工具超时、输出截断、Turn 级 Trace。baseline 仅供 A/B 复现。
@@ -35,6 +35,8 @@
 - **Agent 工具 9 个**：write_file / read_file / list_dir / move_file / open_app / read_clipboard / create_doc / run_command / delete_path
 - **已修复**：剪贴板中文乱码（ctypes 直读 UTF-16）、新对话残留旧流程（切换会话清空 toolCalls/thinkingSteps）、输入框旁重复快捷指令已删
 - **已打包（v0.3.0 Phase 4，2026-09-12 04:00，含确认UI+审计日志+记忆管理+工具卡片+AI摘要+远程控制）**：`LocalMind.exe`（19.9MB，SHA256 `0C8DFC7046F96D00CBC0278A26D628440957BB4C23DAA544993866D21308C6B3`）+ `LocalMindSetup.exe`（50.9MB）+ `LocalFile.apk`（14.9MB）；APK 不含任何内置 key。
+- **双端远控端到端打通（2026-09-13 深夜）**：修掉叠加的 6 处 bug —— ①`build_tools` 把确认回调当成 `emit_thinking` 传，前端收不到 `confirm` SSE → 弹不出确认框 → 工具 60s 超时（现改为真正的 `confirm` 事件 + 聊天区确认卡片）；②`ipc.ts` 的 `initAttempted` 布尔竞态让 `loadSessions`/`createSession` 同 tick 相撞 → 从不建会话、错误被吞（改 Promise memo 化）；③`commands.tenant_id` 外键指向遗留 `pairings` 表（Relay `migrate_v3` 重建表去 FK）；④Android 命令信封漏 `tenant_id` → 路由 403；⑤Relay 权限白名单缺 `chat_task`；⑥Windows 状态回传 `tenant_id: None` → 结果回不来。记忆管理改为读 `session_summaries`（`memory_entries` 从未写入）。
+- **已打包（v0.3.1 APK，2026-09-13 23:50）**：`LocalFile.apk`（17.3MB，versionCode 2，SHA256 `489DF3783B893C2BCB2C45B282E91DF02DD25DC8C04728D6831146F86949F19A`），修复「命令执行成功后 Android 主动关连接，OkHttp 补发 `onFailure` 把正确结果覆盖成 `WebSocket error`」——`RelayWssClient` 加终态标志、`RemoteControlViewModel` 改用 `AtomicBoolean` 并在 `onError` 里判终态。模拟器 E2E 复测：手机发指令 → 模拟 PC 收到 → 回传 done → 结果卡片正确显示。
 
 ## 关键决策（ADR 摘要）
 

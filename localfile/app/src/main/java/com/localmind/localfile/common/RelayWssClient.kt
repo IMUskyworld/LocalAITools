@@ -5,6 +5,7 @@ import okhttp3.Request
 import okio.ByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Relay WSS 客户端 — 连接 Relay，发送远程命令，接收状态回传。
@@ -16,6 +17,13 @@ class RelayWssClient(
 ) {
     private val client = RelayTls.relayHttpClient(context, connectTimeoutSeconds = 15, readTimeoutSeconds = 120, writeTimeoutSeconds = 30)
     private var ws: okhttp3.WebSocket? = null
+
+    /**
+     * 本连接是否已经进入终态（收到 done/failed，或已上报过 error）。
+     * 命令完成后客户端会主动 close()，OkHttp 可能紧接着回调 onFailure；
+     * 若不拦住，会把已展示的成功结果覆盖成 "WebSocket error"。
+     */
+    private val terminal = AtomicBoolean(false)
 
     data class StateUpdate(
         val commandId: String,
@@ -83,15 +91,21 @@ class RelayWssClient(
                     if (type == "error") {
                         // Relay 拒绝转发时的原因（未配对 / 权限不足 / 信封非法）
                         // Relay 的 error 信封把原因放在 result_text 里（见 relay_error_envelope）
-                        val code = json.optString("error_code")
-                        val msg = json.optString("result_text").ifEmpty { json.optString("message") }
-                        onError("Relay 拒绝（${code}）：" + msg)
+                        if (terminal.compareAndSet(false, true)) {
+                            val code = json.optString("error_code")
+                            val msg = json.optString("result_text").ifEmpty { json.optString("message") }
+                            onError("Relay 拒绝（${code}）：" + msg)
+                        }
                         return
                     }
                     if (type == "ack" || type == "state") {
                         val cmdId = json.optString("command_id")
                         val state = json.optString("state", "unknown")
                         val result = json.optString("result_text", null)
+                        // 先置终态再回调，确保随后的 onFailure 不会覆盖结果
+                        if (state == "done" || state == "failed") {
+                            terminal.set(true)
+                        }
                         if (cmdId.isNotEmpty()) {
                             onStateUpdate(StateUpdate(cmdId, state, result))
                         }
@@ -104,7 +118,10 @@ class RelayWssClient(
             }
 
             override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
-                onError(t.message ?: "WebSocket error")
+                // 命令完成后的连接收尾属于正常行为，不再上报错误
+                if (terminal.compareAndSet(false, true)) {
+                    onError(t.message ?: "WebSocket error")
+                }
             }
 
             override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {

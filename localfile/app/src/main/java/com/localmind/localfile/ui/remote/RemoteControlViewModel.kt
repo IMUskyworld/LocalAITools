@@ -202,9 +202,11 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             val commandId = java.util.UUID.randomUUID().toString()
             val maxAttempts = 3
             var attempt = 0
-            var finished = false
+            // 终态标志：收到 done/failed 后置位。OKHttp 回调在其自己的线程上，
+            // 且命令完成后连接关闭会补一次 onFailure，因此用原子类型跨线程共享。
+            val finished = java.util.concurrent.atomic.AtomicBoolean(false)
 
-            while (attempt < maxAttempts && !finished) {
+            while (attempt < maxAttempts && !finished.get()) {
                 attempt++
                 if (attempt > 1) {
                     val delayMs = 1500L * (attempt - 1)
@@ -248,7 +250,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                                         commandText = ""
                                     )
                                 }
-                                finished = true
+                                finished.set(true)
                                 doneSignal.complete(true)
                             }
                             "failed" -> {
@@ -263,25 +265,26 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                                         commandText = ""
                                     )
                                 }
-                                finished = true
+                                finished.set(true)
                                 doneSignal.complete(true)
                             }
                         }
                     },
                     onError = { error ->
                         // \u4e0d\u7acb\u5373\u62a5\u9519\uff0c\u4ea4\u7ed9\u5916\u5c42\u91cd\u8bd5\u5faa\u73af\u5904\u7406
+                        if (!finished.get()) {
+                            _state.update { it.copy(resultText = error) }
+                        }
                         doneSignal.complete(false)
-                        kotlinx.coroutines.runBlocking { }
-                        _state.update { it.copy(resultText = error) }
                     }
                 )
 
                 // \u7b49\u5f85\u672c\u6b21\u5c1d\u8bd5\u7ed3\u675f\uff08\u6210\u529f\u3001\u5931\u8d25\u6216 30s \u8d85\u65f6\uff09
                 val settled = withTimeoutOrNull(30_000L) { doneSignal.await() } ?: false
-                if (settled || finished) break
+                if (settled || finished.get()) break
             }
 
-            if (!finished) {
+            if (!finished.get()) {
                 _state.update {
                     it.copy(
                         isSending = false,
