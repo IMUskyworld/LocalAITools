@@ -680,12 +680,11 @@ fn migrate(conn: &Connection) -> Result<()> {
 ///
 /// SQLite 不支持 ALTER 掉外键，只能重建表并回填数据。
 fn migrate_v3(conn: &Connection) -> Result<()> {
-    let has_commands: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commands'",
-            [],
-            |row| row.get::<_, i64>(0).map(|n| n > 0),
-        )?;
+    let has_commands: bool = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commands'",
+        [],
+        |row| row.get::<_, i64>(0).map(|n| n > 0),
+    )?;
     if !has_commands {
         return Ok(());
     }

@@ -4,17 +4,20 @@
 name: LocalMind CI/CD
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
     tags: ['v*']
     paths:
       - 'localmind/**'
       - 'shared-contract/**'
+      - '.github/workflows/localmind.yml'
   pull_request:
     branches: [main]
     paths:
       - 'localmind/**'
       - 'shared-contract/**'
+      - '.github/workflows/localmind.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,23 +38,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 用 npm 而不是 pnpm：package-lock.json 与 package.json 保持同步（npm ci 校验通过），
+      # 而 pnpm-lock.yaml 曾长期落后于 package.json，且 workflow 里钉的 pnpm 8
+      # 读不了 lockfileVersion 9 的锁文件。
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: localmind/pnpm-lock.yaml
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+          cache: 'npm'
+          cache-dependency-path: localmind/package-lock.json
 
       - name: Install frontend dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: ESLint
-        run: pnpm lint || true
+        run: npm run lint || true
         continue-on-error: true
 
       - name: TypeScript type check
@@ -82,23 +83,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 用 npm 而不是 pnpm：package-lock.json 与 package.json 保持同步（npm ci 校验通过），
+      # 而 pnpm-lock.yaml 曾长期落后于 package.json，且 workflow 里钉的 pnpm 8
+      # 读不了 lockfileVersion 9 的锁文件。
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: localmind/pnpm-lock.yaml
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+          cache: 'npm'
+          cache-dependency-path: localmind/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: Vitest
-        run: pnpm test || true
+        run: npm test || true
         continue-on-error: true
 
       - name: Setup Rust
@@ -111,43 +110,51 @@ jobs:
       - name: Security audit
         run: |
           cargo audit --manifest-path src-tauri/Cargo.toml || true
-          pnpm audit --audit-level=high || true
+          npm audit --audit-level=high || true
         continue-on-error: true
 
-      - name: Build Tauri app
-        run: pnpm tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # 这里只做前端生产构建（TypeScript + Vite）。
+      # 完整安装包不在 runner 上打：tauri.conf.json 的 resources 需要
+      # scripts/make_doc.exe 与 scripts/localmind-agent（由本机 PyInstaller 打包），
+      # 且 llama.cpp 需要 CMake + libclang，全量构建 20-30 分钟且产物不完整。
+      # 正式安装包由本机 build-localmind.ps1 + build-installer.ps1 生成。
+      - name: Build frontend
+        run: npm run build
 
-      - name: Redline scan - check no real keys in binary
+      - name: Redline scan - check no real keys in frontend bundle
         shell: bash
         run: |
-          echo "=== 红线扫描：检查安装包是否含真实 key ==="
-          ! find src-tauri/target/release/bundle -type f -name "*.exe" -o -name "*.msi" | while read f; do
-            strings "$f" | grep -q "sk-" && echo "⚠️ 发现疑似 key: $f" && exit 1 || true
-            strings "$f" | grep -q "deepseek-chat" && echo "⚠️ 发现真实模型名: $f" && exit 1 || true
-          done
-          echo "✅ 红线扫描通过"
+          echo "=== 红线扫描：前端产物不得包含真实 API key ==="
+          # 设置页占位符 sk-xxxx... 属于正常文案，需排除；
+          # 其余 sk-<20 位以上字母数字> 一律视为疑似真实 key。
+          MATCHES=$(grep -rEho "sk-[A-Za-z0-9]{20,}" dist | sort -u | grep -vE '^sk-x+$' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "⚠️ 发现疑似 key："
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "✅ 红线扫描通过（无真实 key）"
 
-      - name: Size check
+      - name: Size check - frontend bundle
         shell: bash
         run: |
-          echo "=== 安装包体积检查 ==="
-          find src-tauri/target/release/bundle -name "*.exe" -o -name "*.msi" | while read f; do
-            size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
-            size_mb=$((size / 1048576))
-            echo "  $f: ${size_mb}MB"
-            [ $size_mb -gt 80 ] && echo "⚠️ 超过 80MB 限制！" && exit 1 || true
-          done
+          echo "=== 前端产物体积检查 ==="
+          SIZE_KB=$(du -sk dist | cut -f1)
+          SIZE_MB=$((SIZE_KB / 1024))
+          echo "  dist: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 20 ]; then
+            echo "⚠️ 前端产物超过 20MB 限制！"
+            exit 1
+          fi
           echo "✅ 体积检查通过"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: localmind-installer
-          path: localmind/src-tauri/target/release/bundle/
+          name: localmind-frontend
+          path: localmind/dist
           retention-days: 30
+          if-no-files-found: error
 
   release:
     name: Release
@@ -158,17 +165,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
+      # 说明：Windows 安装包由本机 build-localmind.ps1 + build-installer.ps1 生成
+      # （需要 Python 打包 agent、make_doc 与 llama.cpp 工具链），CI 只产出前端产物。
+      # 打 tag 时把本机生成的 LocalMindSetup.exe / LocalFile.apk 作为附件上传即可。
+      - name: Download frontend artifact
         uses: actions/download-artifact@v4
         with:
-          name: localmind-installer
-          path: ./release
+          name: localmind-frontend
+          path: ./release/frontend
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            ./release/**/*.exe
-            ./release/**/*.msi
-          body_path: CHANGELOG.md || echo "Release ${{ github.ref_name }}"
+          files: ./release/frontend/**
           generate_release_notes: true

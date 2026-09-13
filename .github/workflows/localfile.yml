@@ -4,17 +4,20 @@
 name: LocalFile CI/CD
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
     tags: ['v*']
     paths:
       - 'localfile/**'
       - 'shared-contract/**'
+      - '.github/workflows/localfile.yml'
   pull_request:
     branches: [main]
     paths:
       - 'localfile/**'
       - 'shared-contract/**'
+      - '.github/workflows/localfile.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -94,8 +97,15 @@ jobs:
           echo "=== 红线扫描：检查 APK 是否含真实 key ==="
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
-            ! strings "$APK_FILE" 2>/dev/null | grep -q "sk-" || (echo "⚠️ 发现疑似 key" && exit 1)
-            ! strings "$APK_FILE" 2>/dev/null | grep -q "deepseek-chat" || (echo "⚠️ 发现真实模型名" && exit 1)
+            # 注意：APK 内本来就有掩码文案 "sk-..."，所以不能用 grep "sk-" 直接判断，
+            # 这里只匹配 sk-<20 位以上字母数字> 且排除 sk-xxxx 占位符。
+            FOUND=$(strings "$APK_FILE" 2>/dev/null | grep -Eho "sk-[A-Za-z0-9]{20,}" | sort -u | grep -vE '^sk-x+$' || true)
+            if [ -n "$FOUND" ]; then
+              echo "⚠️ 发现疑似 key："
+              echo "$FOUND"
+              exit 1
+            fi
+            strings "$APK_FILE" 2>/dev/null | grep -q "deepseek-chat" && (echo "⚠️ 发现真实模型名" && exit 1) || true
           fi
           echo "✅ 红线扫描通过"
 
