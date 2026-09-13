@@ -6,7 +6,15 @@ import { checkOllama, type OllamaModel } from '@/api/ollama';
 import type { SelectedAttachment } from '@/api/files';
 import type { ToolLog } from '@/api/agent';
 
-export interface ChatStoreState {
+export interface PendingConfirm {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  /** 内部：Promise resolver，仅存于内存，不参与序列化 */
+  __resolve?: (approved: boolean) => void;
+}
+
+interface ChatStoreState {
   sessions: ChatSession[];
   currentSessionId: string | null;
   messages: Record<string, ChatMessage[]>;
@@ -63,6 +71,10 @@ export interface ChatStoreActions {
   addToolCall: (log: ToolLog) => void;
   clearToolCalls: () => void;
   addThinkingStep: (step: ThinkingStep) => void;
+  /** 待用户确认的高危工具调用（run_command / delete_path 等） */
+  pendingConfirm: PendingConfirm | null;
+  requestConfirm: (req: { id: string; tool: string; args: Record<string, unknown> }) => Promise<boolean>;
+  resolveConfirm: (approved: boolean) => void;
   clearThinkingSteps: () => void;
 }
 
@@ -119,6 +131,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   attachments: [],
   toolCalls: [],
   thinkingSteps: [],
+  pendingConfirm: null,
 
   createSession: async (title?: string) => {
     try {
@@ -352,5 +365,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   addToolCall: (log: ToolLog) => set((s) => ({ toolCalls: [...s.toolCalls, log] })),
   clearToolCalls: () => set({ toolCalls: [] }),
   addThinkingStep: (step: ThinkingStep) => set((s) => ({ thinkingSteps: [...s.thinkingSteps, step] })),
+
+  // 高危工具确认：把请求放进 store，由 UI 渲染确认卡片。
+  // 用户点击后 resolve 这个 Promise，Agent 侧阻塞等待的 request_confirmation 才会返回，
+  // 前端随后把结果 POST 到 /agent/confirm。
+  requestConfirm: (req) =>
+    new Promise<boolean>((resolve) => {
+      set({ pendingConfirm: { ...req, __resolve: resolve } });
+    }),
+
+  resolveConfirm: (approved) => {
+    const pending = get().pendingConfirm;
+    set({ pendingConfirm: null });
+    pending?.__resolve?.(approved);
+  },
   clearThinkingSteps: () => set({ thinkingSteps: [] }),
 }));

@@ -99,6 +99,8 @@ export default function ChatPage() {
   const clearAttachments = useChatStore((s) => s.clearAttachments);
   const toolCalls = useChatStore((s) => s.toolCalls);
   const thinkingSteps = useChatStore((s) => s.thinkingSteps);
+  const pendingConfirm = useChatStore((s) => s.pendingConfirm);
+  const resolveConfirm = useChatStore((s) => s.resolveConfirm);
   const createSession = useChatStore((s) => s.createSession);
   const switchSession = useChatStore((s) => s.switchSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
@@ -340,6 +342,33 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+
+        {/* 高危工具确认卡片：run_command / delete_path 执行前必须由用户点确认 */}
+        {pendingConfirm && (
+          <div className="confirm-card">
+            <div className="confirm-header">
+              <span className="confirm-icon">⚠️</span>
+              <span className="confirm-title">需要你确认才能执行</span>
+            </div>
+            <div className="confirm-tool">
+              工具：<code>{pendingConfirm.tool}</code>
+            </div>
+            <pre className="confirm-args">
+              {JSON.stringify(pendingConfirm.args, null, 2)}
+            </pre>
+            <div className="confirm-warning">
+              这是高权限操作，可能修改系统状态。请确认命令内容无误后再执行。
+            </div>
+            <div className="confirm-actions">
+              <button className="btn-primary confirm-allow" onClick={() => resolveConfirm(true)}>
+                确认执行
+              </button>
+              <button className="btn-secondary confirm-deny" onClick={() => resolveConfirm(false)}>
+                拒绝
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Input Area */}
         <div className="chat-input-area">

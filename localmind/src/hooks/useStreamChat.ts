@@ -36,6 +36,7 @@ export function useStreamChat(): UseStreamChatReturn {
   const attachments = useChatStore((s) => s.attachments);
   const addToolCall = useChatStore((s) => s.addToolCall);
   const addThinkingStep = useChatStore((s) => s.addThinkingStep);
+  const requestConfirm = useChatStore((s) => s.requestConfirm);
   const clearToolCalls = useChatStore((s) => s.clearToolCalls);
   const clearThinkingSteps = useChatStore((s) => s.clearThinkingSteps);
   const abortRef = useRef<AbortController | null>(null);
@@ -112,10 +113,9 @@ export function useStreamChat(): UseStreamChatReturn {
           }).catch(() => {});
         },
         onThinking: addThinkingStep,
-        onConfirm: async (req) => {
-          const argsStr = JSON.stringify(req.args, null, 2);
-          return window.confirm('Confirm ' + req.tool + '?\n\n' + argsStr);
-        },
+        // 高危工具（run_command / delete_path）需要用户确认。
+        // 走 store + UI 卡片，而不是 window.confirm —— 后者在 Tauri WebView 里不可靠。
+        onConfirm: requestConfirm,
       });
       partialContent = result.content;
 
@@ -180,7 +180,7 @@ export function useStreamChat(): UseStreamChatReturn {
     currentSessionId, mode, selectedOllamaModel, attachments,
     addMessage, updateMessage, setIsStreaming, setError, getCurrentMessages,
     beginTurn, completeTurn, failTurn, addToolCall, clearToolCalls,
-    addThinkingStep, clearThinkingSteps,
+    addThinkingStep, clearThinkingSteps, requestConfirm,
   ]);
 
   const stopGeneration = useCallback(() => {

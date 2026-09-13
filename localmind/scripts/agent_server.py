@@ -317,6 +317,7 @@ def build_tools(
     policy: ToolPolicy,
     trace: TraceRecorder | None = None,
     variant: str = "baseline",
+    emit_event=None,
 ) -> ToolRegistry:
     """构建 Registry 声明的工具。v2 增加重复调用检测、结构化错误和输出截断。"""
     v2 = variant == "v2"
@@ -526,9 +527,28 @@ def build_tools(
             # 高危工具需要用户确认
             spec = TOOL_SPECS.get(name)
             if spec and spec.confirmation_required:
-                confirmed = request_confirmation(name, kwargs, lambda evt: emit_thinking("confirming", json.dumps(evt, ensure_ascii=False), "running"))
+                # 注意：这里必须发顶层的 `confirm` SSE 事件，前端才会弹确认框并回传结果。
+                # 之前误用了 emit_thinking，前端只把它当成一行思考文字，
+                # 于是永远等不到确认结果，60 秒超时后判定为"用户拒绝"，
+                # 模型重试一次后整轮报 "exceeded max retries count of 1"。
+                def _ask_user(payload):
+                    if emit_event is not None:
+                        emit_event(payload)
+                    else:
+                        # 兜底：没有事件通道时至少让用户看到请求内容
+                        emit_thinking(
+                            "confirming",
+                            f"需要确认：{payload.get('tool')} {json.dumps(payload.get('args'), ensure_ascii=False)}",
+                            "running",
+                        )
+
+                confirmed = request_confirmation(name, kwargs, _ask_user)
                 if not confirmed:
-                    return _structured_error("CONFIRMATION_DENIED", f"用户拒绝执行 {name}", retryable=False)
+                    return _structured_error(
+                        "CONFIRMATION_DENIED",
+                        f"用户拒绝或未在时限内确认执行 {name}",
+                        retryable=False,
+                    )
 
             try:
                 output = str(fn(**kwargs) or "")
@@ -975,7 +995,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 allowed_roots=allowed_roots,
                 selected_attachment_paths=selected_attachment_paths,
             )
-            tools = build_tools(self._emit_thinking, policy, trace=trace, variant=variant)
+            tools = build_tools(self._emit_thinking, policy, trace=trace, variant=variant, emit_event=self._write_event)
             prompt, history = split_messages(body.get("messages", []))
 
             system_prompt = build_system_prompt(desktop, variant)

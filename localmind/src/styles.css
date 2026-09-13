@@ -3643,3 +3643,47 @@ input, textarea, select {
   opacity: 0.75;
   margin-left: 2px;
 }
+
+/* 高危工具确认卡片 */
+.confirm-card {
+  margin: 8px 12px;
+  padding: 14px 16px;
+  border: 1px solid #f0a020;
+  border-left: 4px solid #f0a020;
+  border-radius: 10px;
+  background: rgba(240, 160, 32, 0.08);
+}
+.confirm-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.confirm-icon { font-size: 1.1rem; }
+.confirm-title { font-weight: 600; font-size: 0.95rem; }
+.confirm-tool { font-size: 0.85rem; margin-bottom: 6px; }
+.confirm-tool code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+.confirm-args {
+  background: var(--code-bg, #f8f8f8);
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0 0 8px 0;
+}
+.confirm-warning { font-size: 0.78rem; color: #b7791f; margin-bottom: 10px; }
+.confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.btn-secondary {
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--text-primary, #333);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn-secondary:hover { background: rgba(0,0,0,0.04); }
