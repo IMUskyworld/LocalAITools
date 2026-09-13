@@ -55,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +71,16 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+
+    // 版本号从 PackageManager 读（不要用 BuildConfig.VERSION_NAME：
+    // 它是编译期常量，会被内联；改版本号后增量编译可能仍残留旧值，
+    // 实测 0.3.2 的包里显示成 0.3.0）。
+    val context = LocalContext.current
+    val appVersion = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -220,7 +231,7 @@ fun SettingsScreen(
         item {
             SettingsCard(
                 title = "关于",
-                subtitle = "LocalFile v" + com.localmind.localfile.BuildConfig.VERSION_NAME,
+                subtitle = if (appVersion.isNullOrEmpty()) "LocalFile" else "LocalFile v$appVersion",
                 icon = Icons.Default.Info
             )
         }

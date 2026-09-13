@@ -158,7 +158,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     if (!stored) return;
     set({ busy: true, error: null });
     try {
-      const devices = await listAccountDevices(stored.tokens.access_token);
+      const devices = await withFreshAccessToken((token) => listAccountDevices(token));
       set({ devices });
     } catch (error) {
       set({ error: messageFor(error) });
@@ -173,10 +173,10 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     const stored = getStoredAuth();
     if (!stored) return;
     try {
-      const pending = await listPairingRequests(stored.tokens.access_token);
+      const pending = await withFreshAccessToken((token) => listPairingRequests(token));
       set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
-    } catch (error) {
-      // 未配对时 Relay 可能返回空/错误，不打扰用户
+    } catch {
+      // 未配对 / Relay 抖动时不打扰用户，保持空列表
       set({ pairingRequests: [] });
     }
   },
@@ -187,8 +187,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     if (!stored) return;
     set({ busy: true, error: null });
     try {
-      await approvePairingRequest(stored.tokens.access_token, requestId);
-      const pending = await listPairingRequests(stored.tokens.access_token);
+      await withFreshAccessToken((token) => approvePairingRequest(token, requestId));
+      const pending = await withFreshAccessToken((token) => listPairingRequests(token));
       set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
     } catch (error) {
       set({ error: messageFor(error) });
@@ -203,8 +203,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     if (!stored) return;
     set({ busy: true, error: null });
     try {
-      await rejectPairingRequest(stored.tokens.access_token, requestId);
-      const pending = await listPairingRequests(stored.tokens.access_token);
+      await withFreshAccessToken((token) => rejectPairingRequest(token, requestId));
+      const pending = await withFreshAccessToken((token) => listPairingRequests(token));
       set({ pairingRequests: pending.filter((r) => r.status === 'pending') });
     } catch (error) {
       set({ error: messageFor(error) });
@@ -219,8 +219,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     if (!stored) return;
     set({ busy: true, error: null });
     try {
-      await removeAccountDevice(stored.tokens.access_token, deviceId);
-      const devices = await listAccountDevices(stored.tokens.access_token);
+      await withFreshAccessToken((token) => removeAccountDevice(token, deviceId));
+      const devices = await withFreshAccessToken((token) => listAccountDevices(token));
       set({ devices });
     } catch (error) {
       set({ error: messageFor(error) });
@@ -241,4 +241,24 @@ function messageFor(error: unknown): string {
   }
   if (error instanceof Error) return error.message;
   return '账号服务暂时不可用';
+}
+
+/**
+ * 用当前 access token 调 Relay；若已过期（403005）自动用 refresh token 换新并重存后重试一次。
+ *
+ * access token 只有 30 分钟有效期，只有 initialize() 会在启动时刷新。
+ * 没有这层兜底时，软件连续运行超过 30 分钟后在账号页点「批准/刷新设备」会直接失败，
+ * 用户只能重启客户端。
+ */
+async function withFreshAccessToken<T>(fn: (accessToken: string) => Promise<T>): Promise<T> {
+  const stored = getStoredAuth();
+  if (!stored) throw new Error('尚未登录账号');
+  try {
+    return await fn(stored.tokens.access_token);
+  } catch (error) {
+    if (!(error instanceof RelayApiError) || error.code !== '403005') throw error;
+    const session = await refreshAccount(stored.tokens.refresh_token);
+    storeAuth(session);
+    return await fn(session.tokens.access_token);
+  }
 }

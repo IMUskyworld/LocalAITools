@@ -90,10 +90,22 @@ def test_create_doc_requires_allowed_output_path(tmp_path: Path):
 
 
 def test_registry_rejects_unregistered_tool():
+    """Registry 只允许注册 TOOL_SPECS 中声明过的工具（防止偷偷注册未声明能力）。"""
     registry = ToolRegistry()
     with pytest.raises(KeyError):
-        registry.register("run_command", lambda: None)
-    assert "run_command" not in TOOL_SPECS
+        registry.register("format_disk", lambda: None)
+
+
+def test_high_risk_tools_require_confirmation():
+    """run_command / delete_path 已从「永久禁止」改为「高危 + 强制用户确认」。
+
+    这条断言跟随 ADR 变更：工具必须留在 TOOL_SPECS 中显式声明，
+    且 confirmation_required=True（Python 侧 request_confirmation，前端确认卡片）。
+    """
+    for name in ("run_command", "delete_path"):
+        spec = TOOL_SPECS[name]
+        assert spec.confirmation_required is True, f"{name} 必须强制确认"
+        assert spec.risk_level in {"L3", "L4"}, f"{name} 风险等级不应低于 L3"
 
 def test_missing_file_is_file_not_found_not_policy_denied(tmp_path: Path):
     policy = policy_for(tmp_path)

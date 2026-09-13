@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
@@ -83,25 +85,17 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
     }
 
-    val deviceToken: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_DEVICE_TOKEN] ?: ""
-    }
+    val deviceToken: Flow<String> = encryptedFlow(KEY_DEVICE_TOKEN.name)
 
     suspend fun setDeviceCredentials(id: String, token: String) {
-        context.dataStore.edit { prefs ->
-            prefs[KEY_DEVICE_ID] = id
-            prefs[KEY_DEVICE_TOKEN] = token
-        }
+        context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
+        setEncrypted(KEY_DEVICE_TOKEN.name, token)
     }
 
-    // Account session
-    val accountAccessToken: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_ACCOUNT_ACCESS_TOKEN] ?: ""
-    }
+    // Account session（access/refresh token 属于凭据，加密存储）
+    val accountAccessToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_ACCESS_TOKEN.name)
 
-    val accountRefreshToken: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_ACCOUNT_REFRESH_TOKEN] ?: ""
-    }
+    val accountRefreshToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_REFRESH_TOKEN.name)
 
     val accountEmail: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_ACCOUNT_EMAIL] ?: ""
@@ -118,11 +112,11 @@ class PreferencesManager(private val context: Context) {
         displayName: String
     ) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_ACCOUNT_ACCESS_TOKEN] = accessToken
-            prefs[KEY_ACCOUNT_REFRESH_TOKEN] = refreshToken
             prefs[KEY_ACCOUNT_EMAIL] = email
             prefs[KEY_ACCOUNT_DISPLAY_NAME] = displayName
         }
+        setEncrypted(KEY_ACCOUNT_ACCESS_TOKEN.name, accessToken)
+        setEncrypted(KEY_ACCOUNT_REFRESH_TOKEN.name, refreshToken)
     }
 
     suspend fun clearAccountSession() {
@@ -132,6 +126,8 @@ class PreferencesManager(private val context: Context) {
             prefs.remove(KEY_ACCOUNT_EMAIL)
             prefs.remove(KEY_ACCOUNT_DISPLAY_NAME)
         }
+        setEncrypted(KEY_ACCOUNT_ACCESS_TOKEN.name, "")
+        setEncrypted(KEY_ACCOUNT_REFRESH_TOKEN.name, "")
     }
 
     // Device name
@@ -175,13 +171,53 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_TENANT_ID] = id }
     }
 
-    // Gateway token
-    val gatewayToken: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_GATEWAY_TOKEN] ?: ""
-    }
+    // Gateway token（用户自填的 DeepSeek API Key）— 加密存储
+    val gatewayToken: Flow<String> = encryptedFlow(KEY_GATEWAY_TOKEN.name)
 
     suspend fun setGatewayToken(token: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_GATEWAY_TOKEN] = token }
+        setEncrypted(KEY_GATEWAY_TOKEN.name, token)
+    }
+
+    // ===== 敏感字段的加密读写 =====
+    //
+    // EncryptedSharedPreferences（AES-256-GCM，密钥存 Android Keystore）。
+    // 兼容策略：
+    //  - 首次读到旧版本写入 DataStore 的明文 → 迁移进加密存储并删除明文；
+    //  - 加密层不可用（Keystore 异常/恢复出厂）时退回 DataStore，保证功能不中断。
+    private fun encryptedFlow(key: String): Flow<String> = flow {
+        val encrypted = runCatching { EncryptedPrefs.getString(context, key) }.getOrNull().orEmpty()
+        if (encrypted.isNotEmpty()) {
+            emit(encrypted)
+            return@flow
+        }
+        val legacyKey = stringPreferencesKey(key)
+        val legacy = context.dataStore.data.map { it[legacyKey] ?: "" }.first()
+        if (legacy.isNotEmpty()) {
+            val migrated = runCatching {
+                EncryptedPrefs.putString(context, key, legacy)
+                true
+            }.getOrDefault(false)
+            if (migrated) {
+                context.dataStore.edit { prefs -> prefs.remove(legacyKey) }
+            }
+        }
+        emit(legacy)
+    }
+
+    private suspend fun setEncrypted(key: String, value: String) {
+        val legacyKey = stringPreferencesKey(key)
+        if (value.isEmpty()) {
+            runCatching { EncryptedPrefs.remove(context, key) }
+            context.dataStore.edit { prefs -> prefs.remove(legacyKey) }
+            return
+        }
+        val encrypted = runCatching {
+            EncryptedPrefs.putString(context, key, value)
+            true
+        }.getOrDefault(false)
+        context.dataStore.edit { prefs ->
+            if (encrypted) prefs.remove(legacyKey) else prefs[legacyKey] = value
+        }
     }
 
     // Offline model

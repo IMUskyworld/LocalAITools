@@ -30,6 +30,9 @@ pub struct TurnStart {
 #[derive(Debug, Clone)]
 pub struct StorageManager {
     db_path: PathBuf,
+    /// auth.json 路径。生产环境为 %APPDATA%/LocalMind/auth.json；
+    /// 测试通过 with_paths 注入临时文件，避免污染用户真实配置。
+    auth_path: PathBuf,
 }
 
 /// 轻量诊断日志（写到 %TEMP%/localmind-rust.log），用于排查 key 读取问题。
@@ -55,6 +58,29 @@ fn auth_config_path() -> std::path::PathBuf {
     std::path::PathBuf::from(base).join("LocalMind").join("auth.json")
 }
 
+/// auth.json 中密文的标记前缀（AES-256-GCM，密钥由 device_id 派生）。
+const API_KEY_ENC_PREFIX: &str = "ENC:";
+
+fn encrypt_api_key(plain: &str, device_id: &str) -> String {
+    format!(
+        "{API_KEY_ENC_PREFIX}{}",
+        crate::crypto_util::encrypt_string(plain, device_id)
+    )
+}
+
+/// 兼容读取：ENC: 前缀视为密文并解密，其余按历史明文返回。
+fn decrypt_api_key_stored(stored: &str, device_id: &str) -> Option<String> {
+    if stored.is_empty() {
+        return None;
+    }
+    match stored.strip_prefix(API_KEY_ENC_PREFIX) {
+        Some(encoded) => crate::crypto_util::decrypt_string(encoded, device_id)
+            .ok()
+            .filter(|value| !value.is_empty()),
+        None => Some(stored.to_string()),
+    }
+}
+
 impl StorageManager {
     pub fn new() -> Result<Self, String> {
         let path = default_db_path()?;
@@ -63,6 +89,11 @@ impl StorageManager {
     }
 
     pub fn with_path(db_path: PathBuf) -> Result<Self, String> {
+        Self::with_paths(db_path, auth_config_path())
+    }
+
+    /// 显式指定数据库与 auth.json 路径（测试用，避免写到真实 %APPDATA%）。
+    pub fn with_paths(db_path: PathBuf, auth_path: PathBuf) -> Result<Self, String> {
         let had_existing_data = std::fs::metadata(&db_path)
             .map(|m| m.len() > 0)
             .unwrap_or(false);
@@ -72,7 +103,7 @@ impl StorageManager {
         }
         let mut conn = open_connection(&db_path)?;
         migrate(&mut conn, &db_path, had_existing_data)?;
-        Ok(Self { db_path })
+        Ok(Self { db_path, auth_path })
     }
 
     pub fn db_path(&self) -> &Path {
@@ -396,8 +427,10 @@ impl StorageManager {
 
 
     pub async fn get_api_key(&self) -> Result<Option<String>, String> {
+        // 解密需要稳定的 device_id；读取失败时为空串，此时密文无法解开（返回 None 而不是错误 key）
+        let device_id = self.get_device_id().await.unwrap_or_default();
         // 1) 首选 auth.json（用户自填模式的主存储）
-        let path = auth_config_path();
+        let path = self.auth_path.clone();
         diag_log(&format!(
             "get_api_key: path={} exists={}",
             path.display(),
@@ -406,10 +439,25 @@ impl StorageManager {
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                    let key = config["deepseek_api_key"].as_str().unwrap_or("");
-                    diag_log(&format!("get_api_key: auth.json key_len={}", key.len()));
-                    if !key.is_empty() {
-                        return Ok(Some(key.to_string()));
+                    let stored = config["deepseek_api_key"].as_str().unwrap_or("");
+                    diag_log(&format!(
+                        "get_api_key: auth.json key_len={} encrypted={}",
+                        stored.len(),
+                        stored.starts_with(API_KEY_ENC_PREFIX)
+                    ));
+                    match decrypt_api_key_stored(stored, &device_id) {
+                        Some(plain) => {
+                            // 历史明文：顺手加密落盘，避免长期明文驻留
+                            if !stored.starts_with(API_KEY_ENC_PREFIX) {
+                                let _ = self.set_api_key(plain.clone()).await;
+                            }
+                            return Ok(Some(plain));
+                        }
+                        None => {
+                            if !stored.is_empty() {
+                                diag_log("get_api_key: auth.json 密文解密失败（device_id 变更或文件损坏）");
+                            }
+                        }
                     }
                 }
             }
@@ -423,18 +471,29 @@ impl StorageManager {
             sqlite_key.as_deref().map(|s| s.len()).unwrap_or(0)
         ));
         match sqlite_key {
-            Some(k) if !k.is_empty() => {
-                // 顺手迁移到 auth.json，之后就读不到了
-                let _ = self.set_api_key(k.clone()).await;
-                Ok(Some(k))
+            Some(stored) if !stored.is_empty() => {
+                match decrypt_api_key_stored(&stored, &device_id) {
+                    Some(plain) => {
+                        // 顺手迁移到 auth.json（加密写入）
+                        let _ = self.set_api_key(plain.clone()).await;
+                        Ok(Some(plain))
+                    }
+                    None => {
+                        diag_log("get_api_key: SQLite 中的 key 无法解密");
+                        Ok(None)
+                    }
+                }
             }
             _ => Ok(None),
         }
     }
 
     pub async fn set_api_key(&self, key: String) -> Result<(), String> {
-        // 主存储：auth.json（用户可见、便于排查）
-        let path = auth_config_path();
+        // 主存储：auth.json。落盘前用设备绑定的 AES-256-GCM 加密（ENC: 前缀），
+        // 保证即使文件被复制走也读不到明文 key。
+        let device_id = self.get_device_id().await?;
+        let stored = encrypt_api_key(&key, &device_id);
+        let path = self.auth_path.clone();
         let mut config = if path.exists() {
             std::fs::read_to_string(&path)
                 .ok()
@@ -446,7 +505,7 @@ impl StorageManager {
         if !config.is_object() {
             config = serde_json::json!({});
         }
-        config["deepseek_api_key"] = serde_json::Value::String(key.clone());
+        config["deepseek_api_key"] = serde_json::Value::String(stored.clone());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
         }
@@ -454,8 +513,8 @@ impl StorageManager {
             .map_err(|e| format!("序列化 auth.json 失败: {e}"))?;
         std::fs::write(&path, json).map_err(|e| format!("写入 auth.json 失败: {e}"))?;
 
-        // 备份存储：SQLite（兼容读取路径）
-        self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &key))
+        // 备份存储：SQLite（写入同样加密的值，避免明文副本残留）
+        self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &stored))
             .await
     }
     pub async fn get_memories(&self, limit: i64) -> Result<Vec<(String, String, String, f64)>, String> {
@@ -748,12 +807,17 @@ mod tests {
     fn api_key_roundtrip_is_consistent() {
         // 回归测试：set_api_key 与 get_api_key 必须使用同一存储，
         // 否则会出现「保存成功但读不到」的问题（曾导致 401 Missing credentials）。
+        //
+        // 关键：auth.json 路径必须注入临时文件。早期版本这里用真实 %APPDATA%，
+        // 导致 `cargo test` 会把用户已配置的 key 覆盖成测试值。
         let dir = tempfile::tempdir().unwrap();
-        let manager = StorageManager::with_path(dir.path().join("localmind.db")).unwrap();
+        let manager = StorageManager::with_paths(
+            dir.path().join("localmind.db"),
+            dir.path().join("auth.json"),
+        )
+        .unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
 
-        // 注意：auth.json 位于真实的 %APPDATA%，因此这里不假设初始为空，
-        // 只验证「写进去的能原样读回来」这一核心不变量。
         let key = "sk-test-roundtrip-1234567890";
         rt.block_on(manager.set_api_key(key.to_string())).unwrap();
         let read_back = rt.block_on(manager.get_api_key()).unwrap();
@@ -763,6 +827,43 @@ mod tests {
         rt.block_on(manager.set_api_key(key2.to_string())).unwrap();
         let read_back2 = rt.block_on(manager.get_api_key()).unwrap();
         assert_eq!(read_back2.as_deref(), Some(key2));
+    }
+
+    #[test]
+    fn api_key_is_encrypted_at_rest_and_legacy_plaintext_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let manager = StorageManager::with_paths(dir.path().join("localmind.db"), auth_path.clone())
+            .unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // 写入后磁盘上不得出现明文
+        let key = "sk-secret-should-not-appear";
+        rt.block_on(manager.set_api_key(key.to_string())).unwrap();
+        let raw = std::fs::read_to_string(&auth_path).unwrap();
+        assert!(!raw.contains(key), "auth.json 不应包含明文 key: {raw}");
+        assert!(raw.contains(API_KEY_ENC_PREFIX), "auth.json 应写入 ENC: 密文");
+        assert_eq!(
+            rt.block_on(manager.get_api_key()).unwrap().as_deref(),
+            Some(key)
+        );
+
+        // 旧版本遗留的明文 auth.json 仍然可读，并在读取后自动迁移为密文
+        std::fs::write(
+            &auth_path,
+            r#"{"deepseek_api_key":"sk-legacy-plaintext-key"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            rt.block_on(manager.get_api_key()).unwrap().as_deref(),
+            Some("sk-legacy-plaintext-key")
+        );
+        let migrated = std::fs::read_to_string(&auth_path).unwrap();
+        assert!(!migrated.contains("sk-legacy-plaintext-key"), "明文应已迁移为密文");
+        assert_eq!(
+            rt.block_on(manager.get_api_key()).unwrap().as_deref(),
+            Some("sk-legacy-plaintext-key")
+        );
     }
     use super::*;
 

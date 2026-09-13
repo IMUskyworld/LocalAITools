@@ -102,12 +102,13 @@ export function useStreamChat(): UseStreamChatReturn {
         signal: controller.signal,
         onToolCall: (log) => {
           addToolCall(log);
-          // L2+ 工具写入审计日志
+          // 工具调用写入审计日志（风险等级按工具取，原来写死 L2 会把
+          // run_command / delete_path 这类高危操作记成中风险）
           tauriInvoke('save_audit_log', {
             sessionId,
             action: log.name,
             target: log.args?.substring?.(0, 200) || null,
-            riskLevel: log.success ? 'L2' : 'L2',
+            riskLevel: riskLevelOf(log.name),
             result: log.success ? 'success' : 'failed',
             detail: log.output?.substring?.(0, 500) || null,
           }).catch(() => {});
@@ -129,13 +130,16 @@ export function useStreamChat(): UseStreamChatReturn {
         result.usage?.total_tokens ?? undefined,
       );
 
-      // AI 辅助摘要生成（异步，不阻塞 UI）
-      generateSummary(content, result.toolLogs).then((summary) => {
-        if (summary) tauriInvoke('save_session_summary', { sessionId, summary }).catch(() => {});
-      }).catch(() => {
-        // fallback: 截取前200字
-        const fallback = content.substring(0, 200).trim();
-        if (fallback) tauriInvoke('save_session_summary', { sessionId, summary: fallback }).catch(() => {});
+      // AI 辅助摘要生成（异步，不阻塞 UI）。
+      // 注意：这里必须喂「助手回复正文 + 工具结果」，不能喂用户输入
+      //（早期版本传的是 content 参数＝用户消息，摘要内容因此完全跑偏）。
+      // 另外 generateSummary 内部已经把异常吞成空串，所以 fallback 要在 then 里判断，
+      // 原来的 .catch(fallback) 永远不会触发。
+      generateSummary(contentWithTools, result.toolLogs).then((summary) => {
+        const text = summary || contentWithTools.substring(0, 200).trim();
+        if (text) {
+          tauriInvoke('save_session_summary', { sessionId, summary: text }).catch(() => {});
+        }
       });
       updateMessage(sessionId, assistantId, {
         id: saved.id,
@@ -184,12 +188,33 @@ export function useStreamChat(): UseStreamChatReturn {
   ]);
 
   const stopGeneration = useCallback(() => {
+    // 停止生成时若还有等待确认的高危操作，先按「拒绝」结掉：
+    // 否则确认卡片会留在界面上，而且事后再点「确认执行」仍会把工具真的跑起来。
+    useChatStore.getState().resolveConfirm(false);
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
   }, [setIsStreaming]);
 
   return { sendMessage, stopGeneration, isStreaming, error };
+}
+
+// ========== 工具风险等级（与 localmind/scripts/tool_registry.py 对齐） ==========
+
+const TOOL_RISK_LEVELS: Record<string, string> = {
+  read_file: 'L0',
+  list_dir: 'L0',
+  read_clipboard: 'L1',
+  open_app: 'L1',
+  write_file: 'L2',
+  move_file: 'L2',
+  create_doc: 'L2',
+  delete_path: 'L3',
+  run_command: 'L4',
+};
+
+function riskLevelOf(toolName: string): string {
+  return TOOL_RISK_LEVELS[toolName] ?? 'L2';
 }
 
 // ========== Session Summary 注入 ==========

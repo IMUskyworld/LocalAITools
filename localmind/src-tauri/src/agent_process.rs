@@ -38,8 +38,22 @@ impl AgentManager {
     /// 获取 Agent 连接信息；未启动则先启动（带缓存）。
     /// 阻塞式：首次启动含 Python 导入 + 端口握手，约 1-3 秒，调用方应走 spawn_blocking。
     pub fn get_or_spawn(&self) -> Result<AgentConfig, String> {
-        if let Some(h) = self.handle.lock().unwrap().as_ref() {
-            return Ok(AgentConfig { port: h.port, token: h.token.clone() });
+        {
+            let mut guard = self.handle.lock().unwrap();
+            if let Some(handle) = guard.as_mut() {
+                // 子进程可能已经退出（崩溃、被杀软清理、OOM）。
+                // 旧实现只缓存端口不做存活检查，一旦进程死掉就会一直把死端口返回给前端，
+                // 表现为「对话永远没反应」，只能重启整个 App。
+                let alive = match handle.child.as_mut() {
+                    Some(child) => matches!(child.try_wait(), Ok(None)),
+                    None => false,
+                };
+                if alive {
+                    return Ok(AgentConfig { port: handle.port, token: handle.token.clone() });
+                }
+                tracing::warn!("本地 Agent 进程已退出，重新拉起");
+                *guard = None;
+            }
         }
         let handle = spawn_agent()?;
         let config = AgentConfig { port: handle.port, token: handle.token.clone() };

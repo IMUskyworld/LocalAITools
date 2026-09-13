@@ -3,6 +3,7 @@ package com.localmind.localfile.ui.remote
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.localmind.localfile.common.AccountApiException
 import com.localmind.localfile.common.AccountClient
 import com.localmind.localfile.common.Logger
 import com.localmind.localfile.common.RelayWssClient
@@ -91,11 +92,16 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             try {
                 // 关键：远控列表必须来自「已批准的控制配对」，而不是账号下的所有设备。
                 // 只有控制配对才带 tenant_id，而 Relay 路由命令时必须要它。
-                val pairings = accountClient.listControlPairings(token, deviceId, deviceToken)
+                val pairings = withFreshAccessToken { access ->
+                    accountClient.listControlPairings(access, deviceId, deviceToken)
+                }
                 val myPairings = pairings.filter { it.isController(deviceId) }
 
-                val deviceNames = accountClient.listDevices(token, deviceId, deviceToken)
-                    .associate { it.id to it.deviceName }
+                // 设备列表一次查询同时用于「显示名映射」和「可申请设备」，避免重复请求 Relay
+                val deviceList = withFreshAccessToken { access ->
+                    accountClient.listDevices(access, deviceId, deviceToken)
+                }
+                val deviceNames = deviceList.associate { it.id to it.deviceName }
 
                 val targets = myPairings.map { p ->
                     RemoteTarget(
@@ -108,13 +114,15 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
 
                 // 还没配对、但可以发起申请的 Windows 设备
                 val pairedIds = myPairings.map { it.peerDeviceId(deviceId) }.toSet()
-                val requestable = accountClient.listDevices(token, deviceId, deviceToken)
+                val requestable = deviceList
                     .filter { it.platform == "windows" && it.id !in pairedIds }
                     .map { RemoteTarget(tenantId = "", targetDeviceId = it.id, deviceName = it.deviceName) }
 
                 // 已发出、等待对方确认的申请
                 val pendingIds = try {
-                    accountClient.listPairingRequests(token, deviceId, deviceToken)
+                    withFreshAccessToken { access ->
+                        accountClient.listPairingRequests(access, deviceId, deviceToken)
+                    }
                         .filter { it.status == "pending" && it.requesterDeviceId == deviceId }
                         .map { it.targetDeviceId }
                         .toSet()
@@ -152,7 +160,9 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             }
             _state.update { it.copy(loading = true, error = null) }
             try {
-                accountClient.createPairingRequest(token, deviceId, deviceToken, targetDeviceId)
+                withFreshAccessToken { access ->
+                    accountClient.createPairingRequest(access, deviceId, deviceToken, targetDeviceId)
+                }
                 _state.update {
                     it.copy(
                         loading = false,
@@ -165,6 +175,32 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                 Logger.e(e)
                 _state.update { it.copy(loading = false, error = "申请失败：${e.message}") }
             }
+        }
+    }
+
+    /**
+     * 用账号 access token 调 Relay；token 过期（403005）时先用 refresh token 换新并持久化，再重试一次。
+     *
+     * access token 只有 30 分钟有效期，而远控页不会走账号页的 restoreSession。
+     * 没有这层兜底时，App 连续开着超过 30 分钟再进远控页就会一直报「加载设备失败」，
+     * 用户只能去账号页刷新或重启 App 才能恢复。
+     */
+    private suspend fun <T> withFreshAccessToken(block: suspend (String) -> T): T {
+        val access = prefs.accountAccessToken.first()
+        return try {
+            block(access)
+        } catch (error: AccountApiException) {
+            if (error.code != "403005") throw error
+            val refresh = prefs.accountRefreshToken.first()
+            if (refresh.isBlank()) throw error
+            val session = accountClient.refreshSession(refresh)
+            prefs.setAccountSession(
+                session.accessToken,
+                session.refreshToken,
+                session.user.email,
+                session.user.displayName,
+            )
+            block(session.accessToken)
         }
     }
 
