@@ -82,9 +82,10 @@ class RelayWssClient(
                     val type = json.optString("type")
                     if (type == "error") {
                         // Relay 拒绝转发时的原因（未配对 / 权限不足 / 信封非法）
+                        // Relay 的 error 信封把原因放在 result_text 里（见 relay_error_envelope）
                         val code = json.optString("error_code")
-                        val msg = json.optString("message")
-                        onError("Relay 拒绝：" + (msg.ifEmpty { code }))
+                        val msg = json.optString("result_text").ifEmpty { json.optString("message") }
+                        onError("Relay 拒绝（${code}）：" + msg)
                         return
                     }
                     if (type == "ack" || type == "state") {

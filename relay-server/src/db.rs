@@ -664,6 +664,55 @@ fn migrate(conn: &Connection) -> Result<()> {
         crate::account_db::migrate_v2(conn)?;
         conn.pragma_update(None, "user_version", 2)?;
     }
+    if version < 3 {
+        migrate_v3(conn)?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+    Ok(())
+}
+
+/// v3：把 commands.tenant_id 对 legacy `pairings` 表的外键去掉。
+///
+/// 背景：账号层的控制配对写在 `device_pairings` 表里，tenant_id 由那里生成。
+/// 但 commands.tenant_id 仍然 REFERENCES pairings(tenant_id)（旧的一次性配对码表），
+/// 于是每一条账号层远控命令插入时都会因外键约束失败，Relay 返回 100002。
+/// 配对合法性已经由 ensure_pair_route 校验，这里不再需要数据库层外键。
+///
+/// SQLite 不支持 ALTER 掉外键，只能重建表并回填数据。
+fn migrate_v3(conn: &Connection) -> Result<()> {
+    let has_commands: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commands'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+    if !has_commands {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         CREATE TABLE commands_v3 (
+             command_id TEXT PRIMARY KEY,
+             tenant_id TEXT NOT NULL,
+             from_device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+             to_device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+             action_type TEXT NOT NULL,
+             envelope_json TEXT NOT NULL,
+             state TEXT NOT NULL,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         INSERT INTO commands_v3
+             (command_id, tenant_id, from_device_id, to_device_id, action_type, envelope_json, state, created_at, updated_at)
+             SELECT command_id, tenant_id, from_device_id, to_device_id, action_type, envelope_json, state, created_at, updated_at
+             FROM commands;
+         DROP TABLE commands;
+         ALTER TABLE commands_v3 RENAME TO commands;
+         CREATE INDEX IF NOT EXISTS idx_commands_target_state
+             ON commands(to_device_id, state, updated_at);
+         PRAGMA foreign_keys = ON;",
+    )?;
     Ok(())
 }
 
