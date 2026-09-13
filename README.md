@@ -1,10 +1,14 @@
 # LocalMind × LocalFile 双端 AI 智能工具
 
-> 一台电脑 + 一部手机，随时随地可调用的个人 AI 助手——在线/离线双模、Agent 自动操作、隐私本地处理。
+> 一台电脑 + 一部手机：Windows 上是**能真正动手干活**的 AI Agent，Android 上是可以**远程指挥它**的遥控器。
 
-| 平台 | 定位 | 许可证 |
+| 端 | 定位 | 技术栈 |
 | --- | --- | --- |
-| Windows 桌面 · Android 手机 | 对话、操作电脑、生成文档 | [MIT](LICENSE) |
+| **LocalMind**（Windows） | 本地 AI Agent：多步工具调用、文档生成、被远程调度 | Tauri 2 + React + Rust + Python (Pydantic AI) |
+| **LocalFile**（Android） | 文件 AI 助手 + 远程控制端 | Kotlin + Jetpack Compose |
+| **LocalMind Relay** | 双端跨网络通道（自建，可选） | Rust + Axum + SQLite |
+
+许可证：[MIT](LICENSE) · 当前产物：[LocalMindSetup.exe](#-发布产物) / [LocalFile.apk](#-发布产物)
 
 ## ✨ 界面预览
 
@@ -16,13 +20,42 @@
 
 ## ✨ 功能特性
 
-- **双端 Agent 循环**：不只是聊天，AI 能调用工具真正完成任务（写文件、读剪贴板、打开应用、生成文档）
-- **7 个 Agent 工具**：`write_file` / `read_file` / `list_dir` / `move_file` / `open_app` / `read_clipboard` / `create_doc`
-- **在线 / 离线双模**：在线用 DeepSeek 云端大模型；离线用 Ollama 本地推理，断网可用
-- **四类文档生成**：PPT / Word / Excel / PDF（内置生成器，无需安装 Office / Python）
-- **精美 GUI**：桌面端 Fluent 风（Tauri Web），手机端 Material 3（Jetpack Compose）
-- **跨网络 Relay**：Android / Windows 只建立出站 WSS，经自建语义中继实现配对、幂等转发和离线队列，不要求用户安装 Tailscale
-- **游客 / 账号双模式（规划中）**：游客无需账号即可本地使用；登录同一账号后用于设备登记和发现，手机控制电脑仍需目标设备本机确认
+### Windows 端（LocalMind）
+
+- **9 个 Agent 工具**：`write_file` / `read_file` / `list_dir` / `move_file` / `open_app` / `read_clipboard` / `create_doc` / `run_command` / `delete_path`
+- **高危操作必须人工确认**：`run_command`（L4）、`delete_path`（L3）执行前弹出确认卡片，展示完整参数；60 秒未确认按拒绝处理
+- **审计日志**：每次工具调用记录工具名、参数、结果与风险等级
+- **路径白名单（Tool Guard）**：默认只允许 桌面 / 文档 / 下载（含 OneDrive 同名目录）；拒绝 `..`、UNC 路径、device namespace、`C:\Windows`、`Program Files`
+- **文档生成**：PPT / Word / Excel / PDF，内置生成器，无需安装 Office 或 Python
+- **流式 + 思考轨迹**：SSE 逐字输出，界面实时显示「规划 → 执行 → 完成」
+- **在线 / 离线双模**：在线用 DeepSeek（`deepseek-flash`），离线用 Ollama 本地模型
+
+### Android 端（LocalFile）
+
+- **文件 AI 助手**：对话式生成 / 修改 Word、PPT、Excel、PDF
+- **手写 Agent 循环**：规划轮 → 工具调用 → 反思轮，工具失败会自动分析原因
+- **远程控制端**：登录账号后向电脑发起控制授权申请、下发指令并查看执行结果
+
+### 双端远程控制
+
+```
+手机(LocalFile) ──申请远控──▶ 账号 + 设备配对
+                                   │
+        电脑(LocalMind) ◀──本机点「批准」── 建立控制配对(tenant_id)
+                                   │
+手机 ──指令──▶ Relay ──转发──▶ 电脑 Agent 执行 ──结果──▶ Relay ──▶ 手机
+```
+
+- 同账号只解决「设备归属与发现」，**不等于可以互控**：必须由电脑本机确认后才建立控制配对
+- 指令按 `command_id` 幂等去重，支持离线队列与断线重连
+
+### 隐私与凭据
+
+- **不内置任何 API Key**：用户在设置页自行填写
+  - Windows：`%APPDATA%\LocalMind\auth.json`，值为 AES-256-GCM 密文（`ENC:` 前缀，密钥由设备 ID 派生）
+  - Android：EncryptedSharedPreferences（Android Keystore 保护）
+- Relay **不保存 key、不保存明文文件内容、不执行任何命令**，只转发版本化 Envelope
+- 卸载 LocalMind 会一并清理本地数据库与配置
 
 ---
 
@@ -30,36 +63,36 @@
 
 | 组件 | 平台 | 技术栈 | 职责 |
 | --- | --- | --- | --- |
-| **LocalMind** | Windows | Tauri 2 + React + Rust + Python (Pydantic AI) | 桌面 AI 助手：在线/离线双模对话、Agent 工具循环（写文件/读剪贴板/打开应用/生成文档） |
-| **LocalFile** | Android | Kotlin + Jetpack Compose + OkHttp | 手机 AI 助手：文件处理、文档生成（Word/PPT/Excel/PDF）、在线对话 |
-| **LocalMind Relay** | 公网服务 | Rust + Axum + SQLite | 设备注册、配对码、WSS 转发、幂等、离线队列；不执行命令 |
+| **LocalMind** | Windows | Tauri 2 + React + Rust + Python (Pydantic AI) | 桌面 Agent：工具循环、文档生成、被远程调度 |
+| **LocalFile** | Android | Kotlin + Jetpack Compose + OkHttp | 文件处理、文档生成、远程控制端 |
+| **LocalMind Relay** | 公网服务 | Rust + Axum + SQLite | 账号、设备登记、控制配对、WSS 转发、幂等、离线队列 |
 
 ---
 
-## 🤖 Agent Harness（多步工具调用循环）
-
-两个端都实现了真正的 Agent 循环——AI 不只是聊天，而是能**调用工具完成任务**。
+## 🤖 Agent Harness
 
 ### LocalMind（Pydantic AI）
 
-Agent 循环下沉到 Python 子进程（`localmind/scripts/agent_server.py`），用 Pydantic AI 2.x 的 `run_stream_events()` 实现多步工具调用 + 失败自动重试：
+Agent 循环下沉到 Python 子进程（`localmind/scripts/agent_server.py`），用 Pydantic AI 2.x 的 `run_stream_events()` 实现多步工具调用：
 
 ```
 [React 前端] --SSE--> http://127.0.0.1:<port>/agent/stream
      ▲                              │
      │ get_agent_config (IPC)       ▼
 [Rust 后端] ---- spawn/kill ---> [Python Agent 服务]
-                                  Pydantic AI Agent
-                                  tools: 7 个工具
+                                  9 个工具 + Tool Guard + 确认机制
 ```
 
-- **7 个工具**：写文件、读文件、列目录、移动/整理文件、打开应用、读剪贴板、生成文档
-- **流式输出**：SSE 逐字返回，UI 实时显示思考轨迹（规划 → 执行 → 完成）
-- **失败自动重试**：工具抛异常由框架喂回模型，自动修正重调
+- **结构化工具错误**：工具失败以结构化结果回灌模型，自动修正后重试
+- **预算与超时**：单轮请求数 / 工具调用数上限、单工具超时、输出截断
+- **Turn 级 Trace**：记录每轮上下文构建、模型请求、工具调用与耗时
+- **交互式确认**：高危工具通过 SSE `confirm` 事件 ↔ 前端确认卡片双向通信
 
-### LocalFile（手写 Agent 循环）
+同一模型下的 A/B 评测（baseline vs Harness v2，12 任务 × 2 轮）：`18/24` → `24/24`，详见 [Phase1-Harness评测报告](开发计划/Phase1-Harness评测报告.md)。
 
-规划 → 工具调用 → 反思 的循环，生成四种文档格式。
+### LocalFile（手写循环）
+
+规划 → 工具调用 → 反思 三轮结构，可生成四种文档格式。
 
 ---
 
@@ -67,18 +100,21 @@ Agent 循环下沉到 Python 子进程（`localmind/scripts/agent_server.py`）�
 
 ```text
 LocalAITools/
-├── localmind/          # Windows 桌面端（Tauri 2 + React + Rust + Python Agent）
-│   ├── src/            # React 前端（TS/TSX）
-│   ├── src-tauri/      # Rust 后端（IPC / 进程管理）
-│   └── scripts/        # Python：agent_server.py（Pydantic AI Harness）、make_doc 文档生成器
-├── localfile/          # Android 端（Kotlin + Jetpack Compose）
+├── localmind/          # Windows 桌面端
+│   ├── src/            # React 前端（TS/TSX）：聊天、账号、远控状态、设置
+│   ├── src-tauri/      # Rust 后端：IPC、Agent 进程管理、SQLite、Relay WSS
+│   └── scripts/        # Python：agent_server.py、tool_registry/tool_policy、文档生成器
+├── localfile/          # Android 端
 │   └── app/src/main/java/com/localmind/localfile/
-│       ├── chat/       # 聊天 + Agent 循环
-│       ├── files/      # 文档生成器（docx/pptx/xlsx/pdf）
-│       └── common/     # 配置、网关、工具定义
-├── relay-server/       # 自建公网语义中继（Rust + Axum + SQLite）
+│       ├── ui/         # Compose 界面（聊天 / 远控 / 账号 / 设置）
+│       ├── chat/       # 对话引擎与手写 Agent 循环
+│       ├── files/      # docx / pptx / xlsx / pdf 生成器
+│       ├── common/      # 网络、TLS、Relay 客户端
+│       └── storage/     # DataStore + 加密存储
+├── relay-server/       # 自建中继（Rust + Axum + SQLite）
 ├── shared-contract/    # 双端共享契约定义
-└── 开发计划/            # 架构设计文档（含调研、系统设计、安全设计等）
+├── docs/               # 界面截图等资源
+└── 开发计划/            # 路线图、ADR、设计文档、评测报告
 ```
 
 ---
@@ -87,69 +123,94 @@ LocalAITools/
 
 ### 前置要求
 
-- **Node.js + pnpm**（LocalMind 前端）
-- **Rust + Cargo**（LocalMind 后端）
-- **Python 3.11+**（LocalMind Agent 服务，仅开发）
-- **Android Studio / JDK 17**（LocalFile）
-- **Ollama**（离线模式，可选）
+| 用途 | 需要 |
+| --- | --- |
+| Windows 端 | Node.js 20+、Rust、Python 3.11（开发）、Ollama（离线模式，可选） |
+| Android 端 | JDK 17、Android SDK |
+| Relay（可选） | Docker（部署）、Rust（本地跑测试） |
 
-### LocalMind（桌面端）
+### 1. Windows 端（LocalMind）
 
-```bash
-cd localmind
-pnpm install
-npm run tauri dev          # 开发模式
-npm run tauri build        # 生产构建
+```powershell
+# 生产构建：先生成 exe，再生成 NSIS 安装包
+.\build-localmind.ps1
+.\build-installer.ps1
 ```
 
-DeepSeek key 通过环境变量传入：
+脚本支持用环境变量覆盖本机工具链路径：`LIBCLANG_PATH`、`LOCALMIND_CARGO_BIN`、`LOCALMIND_CMAKE_BIN`、`LOCALMIND_MSVC_BIN`。
 
-```bash
-export LOCALMIND_DEEPSEEK_KEY=sk-your-key
+开发模式（改 Python 代码即时生效）：
+
+```powershell
+cd localmind
+npm install
 npm run tauri dev
 ```
 
-### LocalFile（Android）
+### 2. Android 端（LocalFile）
 
 ```bash
 cd localfile
-JAVA_HOME=/path/to/jdk ./gradlew :app:assembleDebug
+JAVA_HOME=/path/to/jdk-17 ./gradlew assembleRelease
+# 产物：app/build/outputs/apk/release/LocalFile.apk
 ```
 
-API key 通过构建参数传入：
-
-```bash
-LOCAL_FILE_API_KEY=sk-your-key ./gradlew :app:assembleDebug
-```
-
-不传入 key 时构建出的 APK 使用占位符（聊天功能不可用）。
-
-### LocalMind Relay（开发/部署）
+### 3. Relay（可选，自建服务器）
 
 ```bash
 cargo test --manifest-path relay-server/Cargo.toml
 docker compose -f relay-server/docker-compose.yml up -d --build
 ```
 
-部署细节见 `relay-server/deploy/README.md`。Relay 不执行命令、不保存 DeepSeek Key，也不持久化明文文件内容。
+部署细节见 [relay-server/deploy/README.md](relay-server/deploy/README.md)。
+
+### 4. 填写 API Key
+
+两端都**不需要在构建时提供 key**：
+
+1. 到 [platform.deepseek.com](https://platform.deepseek.com) 申请 Key
+2. Windows：设置页「DeepSeek API Key」→ 填写 → 保存（可点「测试联通」验证）
+3. Android：设置页「DeepSeek API Key」→ 填写 → 保存（可用「DeepSeek 连接」检测）
+
+Key 只保存在本地，仓库与安装包里都不含任何 key。
 
 ---
 
 ## 📦 发布产物
 
-| 文件 | 平台 | 说明 |
-| --- | --- | --- |
-| `LocalMindSetup.exe` | Windows | LocalMind 安装包（NSIS，免安装 Python） |
-| `LocalFile.apk` | Android | LocalFile 安装包 |
+| 文件 | 平台 | 版本 / 大小 | SHA256 |
+| --- | --- | --- | --- |
+| `LocalMindSetup.exe` | Windows | 2026-09-14 构建 · 53.8 MB | `C2B0CBBB54F297ECBBA6D0FC16FF4B0F6CF91E064F56DC83E450F833A60F9D35` |
+| `LocalMind.exe` | Windows | 免安装单文件 · 22.4 MB | `1F2834C7964C31CACF4B84C7B266DC1DB3DC9EBCDEC4BFC5300268A53C5BFB49` |
+| `LocalFile.apk` | Android | v0.3.2 (versionCode 3) · 17.3 MB | `C4309A86726D7AAF30F8E2A51BD7CAD608015AE8EAF7784FE9A5076DCF096A5B` |
+
+> Windows 安装包已内置 Python Agent 与文档生成器，**装完即用，无需另外安装 Python / Office**。
+> 免安装版需把 `LocalMind.exe` 与 `LocalMindScripts/` 放在同一目录。
+
+---
+
+## 🧪 测试
+
+```bash
+cargo test --manifest-path localmind/src-tauri/Cargo.toml      # 22 项
+cargo test --manifest-path relay-server/Cargo.toml              # 3 项
+localmind/scripts/build/agent-venv/Scripts/python.exe -m pytest localmind/scripts/tests -q   # 13 项
+npm --prefix localmind run build                                # TypeScript 类型检查 + 构建
+```
+
+CI 流水线位于 `.github/workflows/`（LocalMind / LocalFile / Relay 三条）。
 
 ---
 
 ## 📚 文档
 
-- [当前开发路线图](开发计划/开发路线图.md) — 当前唯一权威开发基线，固定阶段顺序、职责边界、安全红线和验收标准。
-- [Relay-first ADR](开发计划/ADR-002-relay-first.md) — 同类项目调研、传输方案决策与安全边界。
-- [账号与游客模式 ADR](开发计划/ADR-003-account-and-guest-mode.md) — 游客/账号双模式、设备授权、认证与远程控制边界。
-- [历史架构设计](开发计划/) — 早期行业调研、高层架构、系统设计和用户故事；其中旧 RelayCloud、云端网关方案仅供历史参考。
+- [开发路线图](开发计划/开发路线图.md) —— 当前唯一权威基线：阶段顺序、职责边界、安全红线、验收标准
+- [CONTEXT.md](CONTEXT.md) —— 项目当前状态、领域语言与关键决策（改架构前必读）
+- [Relay-first ADR](开发计划/ADR-002-relay-first.md) —— 同类项目调研、传输方案与安全边界
+- [账号与游客模式 ADR](开发计划/ADR-003-account-and-guest-mode.md) —— 双模式、设备授权与远控边界
+- [IP-only TLS 与内置 CA ADR](开发计划/ADR-004-ip-only-tls-and-client-ca-pinning.md) —— 无域名部署下的 TLS 信任方案
+- [默认模型 ADR](开发计划/ADR-005-default-model-deepseek-flash.md) —— 在线模型统一为 `deepseek-flash`
+- [历史架构设计](开发计划/) —— 早期调研与设计，旧 RelayCloud / 云端网关方案仅供历史参考
 
 ---
 
@@ -161,4 +222,4 @@ docker compose -f relay-server/docker-compose.yml up -d --build
 
 ## ⚠️ 免责声明
 
-本项目为学习用途，文档与说明基于当前代码状态编写，可能随开发演进。
+本项目为校级学习 / 演示项目（部署规模 ≤ 50 用户）。Relay 演示环境为纯公网 IP（无域名、无 ICP 备案）。文档基于当前代码状态编写，可能随开发演进；`run_command` 等高权限工具会真实修改系统状态，请自行确认后再执行。
