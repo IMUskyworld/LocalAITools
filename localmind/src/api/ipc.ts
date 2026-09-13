@@ -23,18 +23,26 @@ export class IpcError extends Error {
 }
 
 let invokeFn: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
-let initAttempted = false;
+// 用 Promise 而非 bool 记录初始化状态：
+// 之前用 `initAttempted` 布尔标志时存在竞态 —— 首个调用者开始 await import，
+// 第二个调用者看到标志已置位就立刻返回，此时 invokeFn 仍是 null，
+// 于是抛出 IPC_UNAVAILABLE。启动阶段 loadSessions / createSession 同时触发，
+// createSession 就是这样被静默失败的（错误随后又被 loadSessions 的 error:null 覆盖）。
+let initPromise: Promise<void> | null = null;
 
 async function getInvoke() {
-  if (!initAttempted) {
-    initAttempted = true;
-    try {
-      const mod = await import('@tauri-apps/api/core');
-      invokeFn = mod.invoke;
-    } catch (e) {
-      console.error('[IPC] @tauri-apps/api/core 不可用:', e);
-    }
+  if (!initPromise) {
+    initPromise = (async () => {
+      try {
+        const mod = await import('@tauri-apps/api/core');
+        invokeFn = mod.invoke;
+      } catch (e) {
+        console.error('[IPC] @tauri-apps/api/core 不可用:', e);
+      }
+    })();
   }
+  // 等待同一个初始化 Promise，保证并发调用都能拿到已就绪的 invoke
+  await initPromise;
   return invokeFn;
 }
 

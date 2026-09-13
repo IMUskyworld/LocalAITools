@@ -34,6 +34,11 @@ pub struct StorageManager {
 
 /// 轻量诊断日志（写到 %TEMP%/localmind-rust.log），用于排查 key 读取问题。
 /// 只记录路径/长度等元信息，绝不记录 key 内容。
+/// 供其他模块调用的诊断日志入口。
+pub fn diag_log_pub(msg: &str) {
+    diag_log(msg);
+}
+
 fn diag_log(msg: &str) {
     use std::io::Write;
     let path = std::env::temp_dir().join("localmind-rust.log");
@@ -52,7 +57,9 @@ fn auth_config_path() -> std::path::PathBuf {
 
 impl StorageManager {
     pub fn new() -> Result<Self, String> {
-        Self::with_path(default_db_path()?)
+        let path = default_db_path()?;
+        diag_log(&format!("StorageManager::new path={}", path.display()));
+        Self::with_path(path)
     }
 
     pub fn with_path(db_path: PathBuf) -> Result<Self, String> {
@@ -78,12 +85,18 @@ impl StorageManager {
         F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
     {
         let path = self.db_path.clone();
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let mut conn = open_connection(&path)?;
             f(&mut conn)
         })
         .await
-        .map_err(|e| format!("数据库任务失败: {}", e))?
+        .map_err(|e| format!("数据库任务失败: {}", e))?;
+
+        if let Err(ref e) = result {
+            // 任何数据库写入/读取失败都记录下来，便于排查"数据没落库"的问题
+            diag_log(&format!("DB operation failed: {e}"));
+        }
+        result
     }
 
     // ===== 会话操作 =====
@@ -117,6 +130,7 @@ impl StorageManager {
     }
 
     pub async fn create_session(&self, title: String) -> Result<ChatSession, String> {
+        diag_log(&format!("create_session title={title:?}"));
         self.with_conn(move |conn| {
             let now = chrono::Utc::now().timestamp_millis();
             let session = ChatSession {
@@ -549,6 +563,41 @@ impl StorageManager {
             )
             .optional()
             .map_err(|e| format!("database error: {e}"))
+        })
+        .await
+    }
+
+    /// 列出所有会话摘要（带会话标题），供「记忆管理」页展示。
+    /// 返回 (session_id, session_title, summary, updated_at)。
+    pub async fn list_session_summaries(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(String, String, String, i64)>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT s.id, COALESCE(s.title, ''), sm.summary, sm.updated_at
+                     FROM session_summaries sm
+                     LEFT JOIN sessions s ON s.id = sm.session_id
+                     ORDER BY sm.updated_at DESC
+                     LIMIT ?1",
+                )
+                .map_err(db_error)?;
+            let rows = stmt
+                .query_map(params![limit], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                })
+                .map_err(db_error)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(db_error)?);
+            }
+            Ok(out)
         })
         .await
     }

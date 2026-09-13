@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.localmind.localfile.common.AccountClient
+import com.localmind.localfile.common.Logger
 import com.localmind.localfile.common.RelayAccountDevice
 import com.localmind.localfile.common.RelayWssClient
 import com.localmind.localfile.storage.PreferencesManager
@@ -31,6 +32,7 @@ data class RemoteControlUiState(
     val statusType: String = "", // "running", "done", "failed"
     val resultText: String = "",
     val history: List<CommandHistoryEntry> = emptyList(),
+    val loading: Boolean = false,
     val error: String? = null
 )
 
@@ -43,28 +45,52 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
     val state: StateFlow<RemoteControlUiState> = _state.asStateFlow()
 
     init {
-        loadDevices()
+        refresh()
     }
 
-    private fun loadDevices() {
+    /**
+     * 拉取可用于远控的 Windows 设备。
+     *
+     * 注意：以前只在 init 里调用一次，如果用户「先打开远控页、后登录账号」，
+     * 页面会永远停在"暂无已配对设备"，且错误信息不显示。现在改为可重复调用，
+     * 页面每次进入都会刷新，用户也能手动点刷新。
+     */
+    fun refresh() {
         viewModelScope.launch {
+            _state.update { it.copy(loading = true, error = null) }
+
             val token = prefs.accountAccessToken.first()
             if (token.isEmpty()) {
-                _state.update { it.copy(error = "请先登录账号") }
+                _state.update {
+                    it.copy(loading = false, devices = emptyList(), error = "尚未登录账号：请先到「账号」页登录")
+                }
                 return@launch
             }
             val deviceId = prefs.deviceId.first()
             val deviceToken = prefs.deviceToken.first()
             if (deviceId.isEmpty() || deviceToken.isEmpty()) {
-                _state.update { it.copy(error = "设备未注册") }
+                _state.update {
+                    it.copy(loading = false, devices = emptyList(), error = "本机尚未登记：请到「账号」页刷新一次")
+                }
                 return@launch
             }
             try {
                 val devices = accountClient.listDevices(token, deviceId, deviceToken)
                 val windowsDevices = devices.filter { it.platform == "windows" }
-                _state.update { it.copy(devices = windowsDevices) }
+                _state.update {
+                    it.copy(
+                        devices = windowsDevices,
+                        loading = false,
+                        error = if (windowsDevices.isEmpty()) {
+                            "账号下没有 Windows 设备。请确认电脑端已登录同一账号，并已在本机完成控制授权配对。"
+                        } else null,
+                    )
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = "加载设备失败: ${e.message}") }
+                Logger.e(e)
+                _state.update {
+                    it.copy(loading = false, devices = emptyList(), error = "加载设备失败：${e.message}")
+                }
             }
         }
     }

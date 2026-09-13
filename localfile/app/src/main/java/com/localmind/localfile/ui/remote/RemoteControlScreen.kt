@@ -34,6 +34,10 @@ fun RemoteControlScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
 
+    // 每次进入远控页都重新拉取设备列表。
+    // 之前只在 ViewModel init 里加载一次，先开页面后登录就会一直空列表。
+    LaunchedEffect(Unit) { viewModel.refresh() }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -43,12 +47,40 @@ fun RemoteControlScreen(
             Text("远程控制", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         }
 
-        item { Text("已配对设备", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 16.dp)) }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("已配对设备", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { viewModel.refresh() }, enabled = !state.loading) {
+                    Text(if (state.loading) "刷新中..." else "刷新")
+                }
+            }
+        }
 
         if (state.devices.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(16.dp)) {
-                    Text("暂无已配对设备。请先在账号页登录并完成设备配对。", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (state.loading) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("正在加载设备...", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else if (!state.error.isNullOrEmpty()) {
+                            Text(
+                                state.error!!,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(onClick = { viewModel.refresh() }) { Text("重试") }
+                        } else {
+                            Text("暂无已配对设备。请先在账号页登录并完成设备配对。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
                 }
             }
         } else {

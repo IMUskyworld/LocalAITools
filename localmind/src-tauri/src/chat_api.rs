@@ -61,6 +61,7 @@ fn dto_message(m: &ChatMessage) -> ChatMessageDto {
 pub async fn list_sessions(
     state: State<'_, crate::AppState>,
 ) -> Result<AppResponse<Vec<ChatSessionDto>>, String> {
+    crate::storage::diag_log_pub("IPC list_sessions called");
     let storage = state.storage.read().await;
     match storage.get_sessions().await {
         Ok(sessions) => Ok(AppResponse::ok(sessions.iter().map(dto_session).collect())),
@@ -73,6 +74,7 @@ pub async fn create_chat_session(
     title: Option<String>,
     state: State<'_, crate::AppState>,
 ) -> Result<AppResponse<ChatSessionDto>, String> {
+    crate::storage::diag_log_pub(&format!("IPC create_chat_session called title={title:?}"));
     let storage = state.storage.read().await;
     match storage.create_session(title.unwrap_or_default()).await {
         Ok(session) => Ok(AppResponse::ok(dto_session(&session))),
@@ -137,6 +139,36 @@ pub async fn set_api_key(
     let storage = state.storage.read().await;
     match storage.set_api_key(key.clone()).await {
         Ok(()) => Ok(AppResponse::ok(true)),
+        Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct SessionSummaryDto {
+    pub session_id: String,
+    pub session_title: String,
+    pub summary: String,
+    pub updated_at: i64,
+}
+
+#[tauri::command]
+pub async fn list_session_summaries(
+    state: State<'_, crate::AppState>,
+    limit: Option<i64>,
+) -> Result<AppResponse<Vec<SessionSummaryDto>>, String> {
+    let storage = state.storage.read().await;
+    let lim = limit.unwrap_or(100);
+    match storage.list_session_summaries(lim).await {
+        Ok(rows) => Ok(AppResponse::ok(
+            rows.into_iter()
+                .map(|(session_id, session_title, summary, updated_at)| SessionSummaryDto {
+                    session_id,
+                    session_title,
+                    summary,
+                    updated_at,
+                })
+                .collect(),
+        )),
         Err(e) => Ok(AppResponse::err("STORAGE_ERROR", &e)),
     }
 }
