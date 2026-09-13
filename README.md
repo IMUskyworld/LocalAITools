@@ -180,8 +180,8 @@ Key 只保存在本地，仓库与安装包里都不含任何 key。
 
 | 文件 | 平台 | 版本 / 大小 | SHA256 |
 | --- | --- | --- | --- |
-| `LocalMindSetup.exe` | Windows | 2026-09-14 构建 · 53.8 MB | `C2B0CBBB54F297ECBBA6D0FC16FF4B0F6CF91E064F56DC83E450F833A60F9D35` |
-| `LocalMind.exe` | Windows | 免安装单文件 · 22.4 MB | `1F2834C7964C31CACF4B84C7B266DC1DB3DC9EBCDEC4BFC5300268A53C5BFB49` |
+| `LocalMindSetup.exe` | Windows | v0.3.2 · 53.8 MB | `AB4F24450E285F1D256B742D024D229D14D53BB858D86CB4103053820A4CB617` |
+| `LocalMind.exe` | Windows | v0.3.2 免安装单文件 · 22.4 MB | `78E9E5F4A0E416180282D0A6B7CA0B8C2122C7CFCC4E4FC031DBD92AF2FCED86` |
 | `LocalFile.apk` | Android | v0.3.2 (versionCode 3) · 17.3 MB | `C4309A86726D7AAF30F8E2A51BD7CAD608015AE8EAF7784FE9A5076DCF096A5B` |
 
 > Windows 安装包已内置 Python Agent 与文档生成器，**装完即用，无需另外安装 Python / Office**。
@@ -210,6 +210,7 @@ CI 流水线位于 `.github/workflows/`（LocalMind / LocalFile / Relay 三条�
 - [账号与游客模式 ADR](开发计划/ADR-003-account-and-guest-mode.md) —— 双模式、设备授权与远控边界
 - [IP-only TLS 与内置 CA ADR](开发计划/ADR-004-ip-only-tls-and-client-ca-pinning.md) —— 无域名部署下的 TLS 信任方案
 - [默认模型 ADR](开发计划/ADR-005-default-model-deepseek-flash.md) —— 在线模型统一为 `deepseek-flash`
+- [需求完成度核对](开发计划/需求完成度核对.md) —— 历史需求逐条状态（已完成 / 部分 / 未完成）与剩余排期
 - [历史架构设计](开发计划/) —— 早期调研与设计，旧 RelayCloud / 云端网关方案仅供历史参考
 
 ---

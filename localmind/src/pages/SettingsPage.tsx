@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { tauriInvoke } from '@/api/ipc';
 
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -153,6 +154,14 @@ export default function SettingsPage() {
     });
   }, []);
 
+  // 版本号运行时读取（原来这里硬编码 0.1.0，和 package.json / 安装包版本长期不一致）
+  const [appVersion, setAppVersion] = useState('—');
+  useEffect(() => {
+    getVersion()
+      .then((v) => setAppVersion(v))
+      .catch(() => setAppVersion('未知'));
+  }, []);
+
   const handleThemeChange = (newTheme: ThemeMode) => {
     setTheme(newTheme);
     localStorage.setItem('localmind-theme', newTheme);
@@ -286,7 +295,7 @@ export default function SettingsPage() {
           </div>
           <div className="about-row">
             <span className="about-label">版本号</span>
-            <span className="about-value">0.1.0</span>
+            <span className="about-value">{appVersion}</span>
           </div>
           <div className="about-row">
             <span className="about-label">运行平台</span>

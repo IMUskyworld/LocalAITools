@@ -88,14 +88,17 @@ jobs:
         run: ./gradlew dependencyCheckAnalyze || true
         continue-on-error: true
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
+      # 构建 release APK（= 实际分发产物，约 17MB）。
+      # 不用 assembleDebug：debug 不开 R8，产物约 78MB，会误触体积红线。
+      # release 使用 debug 签名（见 app/build.gradle.kts），无需额外密钥即可构建安装。
+      - name: Build release APK
+        run: ./gradlew assembleRelease
 
       - name: Redline scan - check no real keys
         shell: bash
         run: |
           echo "=== 红线扫描：检查 APK 是否含真实 key ==="
-          APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
             # 注意：APK 内本来就有掩码文案 "sk-..."，所以不能用 grep "sk-" 直接判断，
             # 这里只匹配 sk-<20 位以上字母数字> 且排除 sk-xxxx 占位符。
@@ -111,20 +114,28 @@ jobs:
 
       - name: Size check
         run: |
-          APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
             SIZE=$(stat -c%s "$APK_FILE" 2>/dev/null)
             SIZE_MB=$((SIZE / 1048576))
             echo "APK size: ${SIZE_MB}MB"
-            [ $SIZE_MB -gt 60 ] && echo "⚠️ 超过 60MB 限制！" && exit 1 || echo "✅ 体积检查通过"
+            if [ $SIZE_MB -gt 60 ]; then
+              echo "⚠️ 超过 60MB 限制！"
+              exit 1
+            fi
+            echo "✅ 体积检查通过"
+          else
+            echo "⚠️ 未找到 release APK"
+            exit 1
           fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: localfile-apk
-          path: localfile/app/build/outputs/apk/debug/*.apk
+          path: localfile/app/build/outputs/apk/release/*.apk
           retention-days: 30
+          if-no-files-found: error
 
   release:
     name: Release
