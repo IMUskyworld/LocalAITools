@@ -105,8 +105,9 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     // QR Code
-    implementation("com.google.zxing:core:3.5.3")
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // 说明：曾声明 zxing（二维码/条码扫描）但代码里从未调用，
+    // 而 zxing-android-embedded 会在 manifest 合并时注入 CAMERA 权限，
+    // 让一个文件助手凭空申请相机权限。等真正做扫码配对时再加回来。
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

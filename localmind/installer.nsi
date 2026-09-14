@@ -13,7 +13,7 @@ Unicode true
 
 ; ---------- Product info ----------
 !define APP_NAME "LocalMind"
-!define APP_VERSION "0.3.0"
+!define APP_VERSION "0.3.2"
 !define APP_ID "com.localmind.app"
 !define INSTALL_DIR "$LOCALAPPDATA\LocalMind"
 !define DATA_DIR "$APPDATA\LocalMind"
@@ -50,13 +50,11 @@ CRCCheck on
 
 ; ---------- Install ----------
 Section "Install" SecMain
-    ; ---- 每次安装都从干净状态开始（用户要求：安装后创建新的记忆文档）----
-    ; 清理上一次安装残留的会话/记忆/API Key 配置，避免旧数据污染新版本
-    Delete "${DATA_DIR}\auth.json"
-    Delete "${DATA_DIR}\localmind.db"
-    Delete "${DATA_DIR}\localmind.db-wal"
-    Delete "${DATA_DIR}\localmind.db-shm"
-    RMDir /r "${DATA_DIR}\traces"
+    ; ---- 安装【不再】清空用户数据 ----
+    ; 历史版本在这里删掉过 auth.json 与 localmind.db，导致「覆盖安装 = 丢 API Key +
+    ; 丢全部会话记录 + 丢记忆文档」。旧数据污染的根因（安装包把 key 写进注册表）
+    ; 已经修掉，数据库也有 migration，所以升级必须保留用户数据。
+    ; 记忆文档本身是「缺了才创建」，卸载时才删除（见 Uninstall 段）。
 
     SetOutPath "${INSTALL_DIR}"
 
@@ -116,8 +114,13 @@ Section "Uninstall"
     Delete "${DATA_DIR}\localmind.db"
     Delete "${DATA_DIR}\localmind.db-wal"
     Delete "${DATA_DIR}\localmind.db-shm"
+    ; 长期记忆文档（含整理前备份）：用户要求卸载时一并删除
+    Delete "${DATA_DIR}\memory.md"
+    Delete "${DATA_DIR}\memory.md.bak"
     RMDir /r "${DATA_DIR}\traces"
-    RMDir "${DATA_DIR}"
+    ; 用 /r 兜底：否则目录里只要还有任何文件（例如未来的新文件）就删不掉，
+    ; 会出现「卸载后 %APPDATA%\LocalMind 残留」
+    RMDir /r "${DATA_DIR}"
 
     ; Remove the legacy injected API key from environment (历史的旧安装包写过)
     DeleteRegValue HKCU "Environment" "LOCALMIND_DEEPSEEK_KEY"

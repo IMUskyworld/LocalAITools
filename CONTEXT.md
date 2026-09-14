@@ -42,8 +42,14 @@
 - **版本号统一（2026-09-14）**：Windows `package.json` / `Cargo.toml` / `tauri.conf.json` / `package-lock.json` 与 Android `versionName` 全部对齐 **0.3.2**（此前 Windows 元数据是 0.3.0、`tauri.conf.json` 是 0.1.0、设置页版本号硬编码 0.1.0）；设置页改为运行时 `getVersion()` 读取。本机 `build-localmind.ps1` + `build-installer.ps1` 已按新版本重打。
 - **CI 三条流水线修复（2026-09-14）**：LocalMind 从 pnpm 切到 npm（pnpm 锁文件落后于 package.json、pnpm 8 读不了 v9 锁文件、setup-node 的 pnpm cache 早于 pnpm 安装），且不再在 runner 上打完整安装包（缺 PyInstaller 产物与 llama.cpp 工具链），改为前端构建 + dist 红线扫描；LocalFile 的阿里云 Maven 镜像改为仅本机启用（runner 侧返回 502），CI 改打 release APK（debug 未混淆约 78MB，会误触体积红线）；Relay 补 `cargo fmt`。三条流水线均加 `workflow_dispatch` 与自路径触发。**验证结果（2026-09-14）：三条全部转绿** —— LocalMind `fff7e9e`、LocalFile `ec7e060`（已能构建 release APK 并上传 artifact）、Relay `1b5ac17`。cli/`cargo test` 这类要编译 llama.cpp 的重活改为仅 `workflow_dispatch` 触发（原本是 continue-on-error，跑不跑都不影响结论，却让每次运行多花 20-30 分钟）。
 - **长期记忆（记忆文档）已实现（2026-09-14）**：`%APPDATA%\LocalMind\memory.md` 为跨会话记忆的唯一事实源（markdown，用户可读可编辑）。每轮结束**复用原有的摘要模型调用**，一次返回「会话摘要 + 新增长期事实」：摘要进 `session_summaries`（服务本会话），事实去重后追加进记忆文档（服务跨会话，零额外模型调用）。注入上限 3000 字符（约 1500 token），超 4000 字符自动触发模型整理，覆盖前留 `memory.md.bak`。实现：`localmind/src-tauri/src/memory_doc.rs`（含 4 个单测）+ `src/api/memory.ts`（含 6 个 vitest）+ 设置页「记忆管理 → 记忆文档」。同一 turn 只写一次（`memory_last_turn_id` 游标），保证重试不重复。
+- **产物复查修复（2026-09-14）**：
+  ① **安装包会丢用户数据**——`installer.nsi` 的 Install 段原本会删除 `auth.json` / `localmind.db` / `traces`，即"覆盖安装 = 丢 API Key + 丢全部会话（现在还会丢不了记忆文档，但会话一定丢）"。已改为安装不清数据（旧数据污染的根因是安装包写注册表 key，早已修掉；数据库有 migration 兜底）。已实测：安装前后 auth.json 与 localmind.db 的 SHA256 完全一致。
+  ② **卸载删不掉记忆文档**——Uninstall 段用 `RMDir`（非递归）收尾，`memory.md` 不在删除列表里 → 目录残留。已显式删除 `memory.md` / `memory.md.bak` 并改用 `RMDir /r`。
+  ③ `installer.nsi` 的 `APP_VERSION` 还是 0.3.0（控制面板显示旧版本）→ 改为 0.3.2。
+  ④ **Android 无谓权限**：zxing（扫码）依赖在代码里从未调用，却在 manifest 合并时注入 `CAMERA` 权限 → 移除依赖（APK 17.3MB → 16.8MB），相机权限消失。
+  ⑤ Android `allowBackup="true"` + `usesCleartextTraffic="true"`：前者会把本地会话与加密凭据纳入云备份（Keystore 凭据跨设备也恢复不了），后者允许明文 HTTP 降级且代码里没有明文请求 → 分别改为 `allowBackup=false`、移除 cleartext 开关。
 - **需求核对**：见 `开发计划/需求完成度核对.md`（六项主需求 + 16 条优化项逐条状态；唯一未完成项是「长期记忆自动沉淀」）。
-- **已打包（v0.3.2，2026-09-14 含长期记忆）**：`LocalMind.exe`（22.4MB，SHA256 `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `22CD553ECEB101AACEB99870AF3E25CC4B839244A063E961E1A2862970B125CC`）+ `LocalFile.apk`（17.3MB，versionCode 3，SHA256 `C4309A86726D7AAF30F8E2A51BD7CAD608015AE8EAF7784FE9A5076DCF096A5B`）。
+- **已打包（v0.3.2，2026-09-14 含长期记忆 + 产物复查修复）**：`LocalMind.exe`（22.4MB，SHA256 `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `20C6A54733598EECA98BEABACED273E803B17AFED572BA6C26B16A0E75BB1724`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `18A0DF93EA84E4EF118ED9F49846FC2CF3ABDB7BCC96A653B9527C4A00F50EA8`）。
 
 ## 关键决策（ADR 摘要）
 

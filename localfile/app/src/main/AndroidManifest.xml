@@ -1,22 +1,22 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 只声明真正使用的权限：CAMERA 曾经声明但代码里从未调用（仅有一个图标 import），
+         属于无谓的权限申请，已移除。 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CAMERA" />
 
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="false" />
-
+    <!-- allowBackup=false：本地保存着会话/文件内容与加密后的 API Key，
+         不应该进云端备份（且 Keystore 保护的凭据跨设备也恢复不了）。
+         usesCleartextTraffic 已移除：全部请求都是 https/wss（DeepSeek 与自建 Relay），
+         没有明文 HTTP 需求，去掉可避免协议降级。 -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LocalFile"
-        android:usesCleartextTraffic="true">
+        android:theme="@style/Theme.LocalFile">
 
         <activity
             android:name=".ui.MainActivity"
