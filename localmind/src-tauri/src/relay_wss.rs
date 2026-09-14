@@ -114,15 +114,38 @@ pub async fn start_relay_wss(
             let tls_config = match build_tls_config() {
                 Ok(c) => c,
                 Err(e) => {
+                    crate::storage::diag_log_pub(&format!("relay: TLS 配置失败 ❌ {e}"));
                     tracing::error!("relay wss tls config error: {e}");
                     break;
                 }
             };
 
+            crate::storage::diag_log_pub(&format!(
+                "relay: 正在连接 {ws_endpoint}（第 {} 次尝试）",
+                state_clone.lock().await.reconnect_attempts + 1
+            ));
             tracing::info!("relay wss connecting to {ws_endpoint}");
             let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(tls_config));
+            // 关键：走「自定义 Request」这条路时，tungstenite 不会自动补 WebSocket 握手头，
+            // 少一个 Sec-WebSocket-Key 就会被中继以 "Missing ... sec-websocket-key" 拒绝
+            // （实测：电脑端因此永远显示离线，而 Node/OkHttp 客户端正常）。
+            let authority = http::Uri::try_from(ws_endpoint.as_str())
+                .ok()
+                .and_then(|u| u.authority().map(|a| a.as_str().to_string()))
+                .unwrap_or_default();
+            let mut ws_key_bytes = [0u8; 16];
+            rand::Rng::fill(&mut rand::thread_rng(), &mut ws_key_bytes);
+            let ws_key = {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD.encode(ws_key_bytes)
+            };
             let request = Request::builder()
                 .uri(&ws_endpoint)
+                .header("Host", authority)
+                .header("Connection", "Upgrade")
+                .header("Upgrade", "websocket")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", ws_key)
                 .header("x-device-id", &device_id)
                 .header("Authorization", format!("Bearer {}", &device_token))
                 .body(())
@@ -135,6 +158,7 @@ pub async fn start_relay_wss(
                         s.reconnect_attempts = 0;
                     }
                     let _ = app_handle.emit("relay-wss-connected", true);
+                    crate::storage::diag_log_pub("relay: 已连接 ✅");
                     tracing::info!("relay wss connected");
 
                     let (mut write, mut read) = ws_stream.split();
@@ -198,9 +222,11 @@ pub async fn start_relay_wss(
 
                     state_clone.lock().await.connected = false;
                     let _ = app_handle.emit("relay-wss-connected", false);
+                    crate::storage::diag_log_pub("relay: 连接已断开，准备重连");
                     tracing::info!("relay wss disconnected");
                 }
                 Err(e) => {
+                    crate::storage::diag_log_pub(&format!("relay: 连接失败 ❌ {e}"));
                     tracing::warn!("relay wss connect error: {e}");
                 }
             }
@@ -210,9 +236,12 @@ pub async fn start_relay_wss(
                 let mut s = state_clone.lock().await;
                 if s.destroyed { break; }
                 s.reconnect_attempts += 1;
-                if s.reconnect_attempts > MAX_RECONNECT {
-                    tracing::error!("relay wss max reconnect attempts reached");
-                    break;
+                // 不再"连败 N 次就永久放弃"：服务器重启、网络抖动后会一直自愈，
+                // 否则用户必须重启软件才能恢复远控（实测踩过）。
+                if s.reconnect_attempts == MAX_RECONNECT + 1 {
+                    crate::storage::diag_log_pub(
+                        "relay: 连续失败已达上限，改为持续重试（每 30 秒一次）",
+                    );
                 }
                 let delay = RECONNECT_BASE * 2u32.saturating_pow(s.reconnect_attempts - 1);
                 let delay = delay.min(Duration::from_secs(30));
