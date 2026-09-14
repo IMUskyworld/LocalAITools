@@ -49,7 +49,7 @@
   ④ **Android 无谓权限**：zxing（扫码）依赖在代码里从未调用，却在 manifest 合并时注入 `CAMERA` 权限 → 移除依赖（APK 17.3MB → 16.8MB），相机权限消失。
   ⑤ Android `allowBackup="true"` + `usesCleartextTraffic="true"`：前者会把本地会话与加密凭据纳入云备份（Keystore 凭据跨设备也恢复不了），后者允许明文 HTTP 降级且代码里没有明文请求 → 分别改为 `allowBackup=false`、移除 cleartext 开关。
 - **需求核对**：见 `开发计划/需求完成度核对.md`（六项主需求 + 16 条优化项逐条状态；唯一未完成项是「长期记忆自动沉淀」）。
-- **已打包（v0.3.2，2026-09-14 含长期记忆 + 产物复查修复）**：`LocalMind.exe`（22.4MB，SHA256 `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `20C6A54733598EECA98BEABACED273E803B17AFED572BA6C26B16A0E75BB1724`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `18A0DF93EA84E4EF118ED9F49846FC2CF3ABDB7BCC96A653B9527C4A00F50EA8`）。
+- **已打包（v0.3.2，2026-09-14 含长期记忆 + 产物复查修复）**：`LocalMind.exe`（22.4MB，SHA256 `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `20C6A54733598EECA98BEABACED273E803B17AFED572BA6C26B16A0E75BB1724`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `EFAC33577F76731A039B9B501846B37F8522BEFE63E607A1AD16622F8C134BA1`）。
 
 ## 关键决策（ADR 摘要）
 
