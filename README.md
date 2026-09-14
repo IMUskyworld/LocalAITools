@@ -29,6 +29,7 @@
 - **文档生成**：PPT / Word / Excel / PDF，内置生成器，无需安装 Office 或 Python
 - **流式 + 思考轨迹**：SSE 逐字输出，界面实时显示「规划 → 执行 → 完成」
 - **在线 / 离线双模**：在线用 DeepSeek（`deepseek-flash`），离线用 Ollama 本地模型
+- **长期记忆（记忆文档）**：每轮对话结束自动沉淀跨会话的稳定事实到 `%APPDATA%\LocalMind\memory.md`，每次对话前注入上下文；文件是可编辑的 markdown，超长自动整理、覆盖前自动留 `.bak`
 
 ### Android 端（LocalFile）
 
@@ -180,8 +181,8 @@ Key 只保存在本地，仓库与安装包里都不含任何 key。
 
 | 文件 | 平台 | 版本 / 大小 | SHA256 |
 | --- | --- | --- | --- |
-| `LocalMindSetup.exe` | Windows | v0.3.2 · 53.8 MB | `AB4F24450E285F1D256B742D024D229D14D53BB858D86CB4103053820A4CB617` |
-| `LocalMind.exe` | Windows | v0.3.2 免安装单文件 · 22.4 MB | `78E9E5F4A0E416180282D0A6B7CA0B8C2122C7CFCC4E4FC031DBD92AF2FCED86` |
+| `LocalMindSetup.exe` | Windows | v0.3.2 · 53.8 MB | `22CD553ECEB101AACEB99870AF3E25CC4B839244A063E961E1A2862970B125CC` |
+| `LocalMind.exe` | Windows | v0.3.2 免安装单文件 · 22.4 MB | `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE` |
 | `LocalFile.apk` | Android | v0.3.2 (versionCode 3) · 17.3 MB | `C4309A86726D7AAF30F8E2A51BD7CAD608015AE8EAF7784FE9A5076DCF096A5B` |
 
 > Windows 安装包已内置 Python Agent 与文档生成器，**装完即用，无需另外安装 Python / Office**。

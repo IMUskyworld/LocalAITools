@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { tauriInvoke } from '@/api/ipc';
+import { fetchMemoryDoc, openMemoryDoc, rewriteMemoryDoc, saveMemoryDoc } from '@/api/memory';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -19,7 +20,15 @@ interface SessionSummary { session_id: string; session_title: string; summary: s
  * 之前这里只读 memory_entries（从未写入过数据），所以永远显示"暂无记忆条目"。
  */
 function MemorySection() {
-  const [tab, setTab] = useState<'summaries' | 'memories'>('summaries');
+  const [tab, setTab] = useState<'summaries' | 'memories' | 'doc'>('summaries');
+  // 记忆文档（memory.md）：跨会话长期记忆的唯一事实源，可直接编辑
+  const [docPath, setDocPath] = useState('');
+  const [docContent, setDocContent] = useState('');
+  const [docCount, setDocCount] = useState(0);
+  const [docLimit, setDocLimit] = useState(3000);
+  const [docBusy, setDocBusy] = useState(false);
+  const [docNotice, setDocNotice] = useState('');
+  const [docError, setDocError] = useState('');
   const [summaries, setSummaries] = useState<SessionSummary[]>([]);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [keyword, setKeyword] = useState('');
@@ -55,6 +64,71 @@ function MemorySection() {
     setMemories((prev) => prev.filter((m) => m.id !== id));
   };
 
+  const loadDoc = useCallback(async () => {
+    setDocError('');
+    try {
+      const doc = await fetchMemoryDoc();
+      setDocPath(doc.path);
+      setDocContent(doc.content);
+      setDocCount(doc.char_count);
+      setDocLimit(doc.inject_limit);
+    } catch (e) {
+      setDocError(e instanceof Error ? e.message : '读取记忆文档失败');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'doc') void loadDoc();
+  }, [tab, loadDoc]);
+
+  const flashNotice = (text: string) => {
+    setDocNotice(text);
+    setTimeout(() => setDocNotice(''), 4000);
+  };
+
+  const handleSaveDoc = async () => {
+    setDocBusy(true);
+    setDocError('');
+    try {
+      const chars = await saveMemoryDoc(docContent);
+      setDocCount(chars);
+      flashNotice('已保存（上一版留在 memory.md.bak）');
+    } catch (e) {
+      setDocError(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setDocBusy(false);
+    }
+  };
+
+  const handleOpenDoc = async () => {
+    try {
+      await openMemoryDoc();
+    } catch (e) {
+      setDocError(e instanceof Error ? e.message : '打开失败');
+    }
+  };
+
+  const handleCompactDoc = async () => {
+    setDocBusy(true);
+    setDocError('');
+    setDocNotice('');
+    try {
+      const compacted = await rewriteMemoryDoc(docContent);
+      if (!compacted) {
+        setDocError('整理失败：模型没有返回有效内容，原文档保持不变');
+        return;
+      }
+      const chars = await saveMemoryDoc(compacted);
+      setDocContent(compacted);
+      setDocCount(chars);
+      flashNotice('已整理并保存（旧版本留在 memory.md.bak）');
+    } catch (e) {
+      setDocError(e instanceof Error ? e.message : '整理失败');
+    } finally {
+      setDocBusy(false);
+    }
+  };
+
   return (
     <section className="settings-card">
       <h2>记忆管理</h2>
@@ -74,6 +148,12 @@ function MemorySection() {
           onClick={() => setTab('memories')}
         >
           长期记忆
+        </button>
+        <button
+          className={`theme-btn ${tab === 'doc' ? 'active' : ''}`}
+          onClick={() => setTab('doc')}
+        >
+          记忆文档
         </button>
       </div>
 
@@ -100,7 +180,54 @@ function MemorySection() {
         </div>
       )}
 
-      {tab === 'summaries' ? (
+      {tab === 'doc' ? (
+        <div>
+          <p className="settings-hint" style={{ marginBottom: 8 }}>
+            每轮对话结束后自动沉淀的长期事实（跨会话生效）。文件是普通 markdown，可以直接改；
+            每次对话前会读取并注入上下文，超过 {docLimit} 字符时自动截断。
+          </p>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary, #999)', marginBottom: 8, wordBreak: 'break-all' }}>
+            {docPath || '（读取中…）'} · {docCount} 字符
+            <button
+              onClick={handleOpenDoc}
+              style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--accent, #6c5ce7)', cursor: 'pointer', fontSize: '0.75rem' }}
+            >
+              打开所在文件夹
+            </button>
+          </div>
+          <textarea
+            value={docContent}
+            onChange={(e) => setDocContent(e.target.value)}
+            rows={14}
+            spellCheck={false}
+            style={{
+              width: '100%',
+              fontFamily: 'Consolas, Monaco, monospace',
+              fontSize: '0.8rem',
+              lineHeight: 1.5,
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid var(--border, #ddd)',
+              background: 'var(--bg-secondary, #fafafa)',
+              color: 'inherit',
+              resize: 'vertical',
+            }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <button className="btn-primary" onClick={handleSaveDoc} disabled={docBusy}>
+              {docBusy ? '处理中…' : '保存'}
+            </button>
+            <button className="btn-secondary" onClick={handleCompactDoc} disabled={docBusy}>
+              整理（压缩合并）
+            </button>
+            <button className="btn-secondary" onClick={loadDoc} disabled={docBusy}>
+              重新读取
+            </button>
+            {docNotice && <span style={{ color: '#27ae60', fontSize: '0.8rem' }}>{docNotice}</span>}
+            {docError && <span style={{ color: '#e74c3c', fontSize: '0.8rem' }}>{docError}</span>}
+          </div>
+        </div>
+      ) : tab === 'summaries' ? (
         summaries.length === 0 ? (
           <p className="settings-hint">暂无会话摘要。与 Agent 对话几轮后，这里会自动出现摘要。</p>
         ) : (

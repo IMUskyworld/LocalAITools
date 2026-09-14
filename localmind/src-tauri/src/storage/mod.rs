@@ -517,6 +517,19 @@ impl StorageManager {
         self.with_conn(move |conn| upsert_setting(conn, "deepseek_api_key", &stored))
             .await
     }
+    /// 读取 app_settings 中的通用键值（长期记忆的 turn 游标等）。
+    pub async fn get_app_setting(&self, key: &str) -> Result<Option<String>, String> {
+        let k = key.to_string();
+        self.with_conn(move |conn| get_setting(conn, &k)).await
+    }
+
+    /// 写入 app_settings 中的通用键值。
+    pub async fn set_app_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        let k = key.to_string();
+        let v = value.to_string();
+        self.with_conn(move |conn| upsert_setting(conn, &k, &v)).await
+    }
+
     pub async fn get_memories(&self, limit: i64) -> Result<Vec<(String, String, String, f64)>, String> {
         self.with_conn(move |conn| {
             let mut stmt = conn.prepare(

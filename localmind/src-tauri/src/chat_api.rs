@@ -318,6 +318,98 @@ pub async fn turn_complete(
     }
 }
 
+/// 长期记忆文档的完整内容（供设置页查看/编辑，也供发送消息前注入上下文）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryDocDto {
+    pub path: String,
+    pub content: String,
+    pub char_count: usize,
+    pub inject_limit: usize,
+    pub compact_threshold: usize,
+}
+
+/// 读取长期记忆文档（不存在时按模板创建）。
+#[tauri::command]
+pub async fn get_memory_doc() -> Result<AppResponse<MemoryDocDto>, String> {
+    let path = crate::memory_doc::default_memory_path();
+    match crate::memory_doc::read_raw(&path) {
+        Ok(content) => Ok(AppResponse::ok(MemoryDocDto {
+            path: path.display().to_string(),
+            char_count: crate::memory_doc::char_count(&content),
+            content,
+            inject_limit: crate::memory_doc::INJECT_CHAR_LIMIT,
+            compact_threshold: crate::memory_doc::COMPACT_CHAR_THRESHOLD,
+        })),
+        Err(e) => Ok(AppResponse::err("MEMORY_DOC_READ_FAILED", &e)),
+    }
+}
+
+/// 保存用户手改（或模型整理后）的记忆文档内容，覆盖前自动留 .bak。
+#[tauri::command]
+pub async fn save_memory_doc(content: String) -> Result<AppResponse<usize>, String> {
+    let path = crate::memory_doc::default_memory_path();
+    match crate::memory_doc::save_user_edit(&path, &content) {
+        Ok(chars) => Ok(AppResponse::ok(chars)),
+        Err(e) => Ok(AppResponse::err("MEMORY_DOC_WRITE_FAILED", &e)),
+    }
+}
+
+/// 追加长期事实（去重；同一 turn 只处理一次，重试不会重复写入）。
+#[tauri::command]
+pub async fn append_memory_facts(
+    state: State<'_, crate::AppState>,
+    turn_id: String,
+    facts: Vec<String>,
+) -> Result<AppResponse<usize>, String> {
+    if facts.is_empty() {
+        return Ok(AppResponse::ok(0));
+    }
+    let storage = state.storage.read().await;
+    match storage.get_app_setting("memory_last_turn_id").await {
+        Ok(Some(last)) if last == turn_id => return Ok(AppResponse::ok(0)),
+        Ok(_) => {}
+        Err(e) => return Ok(AppResponse::err("STORAGE_ERROR", &e)),
+    }
+    let path = crate::memory_doc::default_memory_path();
+    let added = match crate::memory_doc::append_facts(&path, &facts) {
+        Ok(n) => n,
+        Err(e) => return Ok(AppResponse::err("MEMORY_DOC_WRITE_FAILED", &e)),
+    };
+    // 记录游标：写失败不影响本轮记忆已经落盘的事实
+    if let Err(e) = storage.set_app_setting("memory_last_turn_id", &turn_id).await {
+        crate::storage::diag_log_pub(&format!("append_memory_facts: 游标写入失败 {e}"));
+    }
+    Ok(AppResponse::ok(added))
+}
+
+/// 在资源管理器里定位记忆文档（路径由程序生成，不接受外部输入）。
+#[tauri::command]
+pub async fn open_memory_doc() -> Result<AppResponse<bool>, String> {
+    let path = crate::memory_doc::default_memory_path();
+    if let Err(e) = crate::memory_doc::ensure_file(&path) {
+        return Ok(AppResponse::err("MEMORY_DOC_READ_FAILED", &e));
+    }
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.arg(format!("/select,{}", path.display()));
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        match cmd.spawn() {
+            Ok(_) => Ok(AppResponse::ok(true)),
+            Err(e) => Ok(AppResponse::err("OPEN_FAILED", &format!("打开资源管理器失败: {e}"))),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(AppResponse::err("UNSUPPORTED", "当前平台不支持打开资源管理器"))
+    }
+}
+
 #[tauri::command]
 pub async fn turn_fail(
     turn_id: String,

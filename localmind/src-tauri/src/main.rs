@@ -6,6 +6,7 @@ mod chat;
 mod common;
 mod files;
 mod inference;
+mod memory_doc;
 mod model;
 mod relay_http;
 mod crypto_util;
@@ -60,6 +61,10 @@ async fn main() {
             chat_api::save_memory,
             chat_api::delete_memory,
             chat_api::search_memories,
+            chat_api::get_memory_doc,
+            chat_api::save_memory_doc,
+            chat_api::append_memory_facts,
+            chat_api::open_memory_doc,
             relay_wss::connect_relay_wss,
             relay_wss::send_relay_state,
             chat_api::turn_begin,

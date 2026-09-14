@@ -3,6 +3,7 @@ import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { tauriInvoke } from '@/api/ipc';
 import { runAgent, type AgentMessage } from '@/api/agent';
+import { appendMemoryFacts, fetchMemoryDoc, generateTurnInsight, maybeCompactMemory } from '@/api/memory';
 import { generateId } from '@/utils/helpers';
 import type { ChatMessage } from '@/types/chat';
 
@@ -83,15 +84,23 @@ export function useStreamChat(): UseStreamChatReturn {
         if (sr?.data) sessionSummary = sr.data;
       } catch {}
 
+      // 长期记忆：跨会话的稳定事实（不存在时 Rust 侧会按模板创建；超长自动截断）
+      let memoryText = '';
+      try {
+        memoryText = (await fetchMemoryDoc()).content || '';
+      } catch (e) {
+        console.warn('[memory] 读取长期记忆失败，本轮不注入', e);
+      }
+
       const baseMessages = getCurrentMessages()
         .filter((message) => message.id !== assistantId)
         .map((message) => ({
           role: message.role as 'user' | 'assistant',
           content: message.content,
         }));
-      const agentMessages: AgentMessage[] = withSummary(
-        withAttachments(baseMessages, attachments),
-        sessionSummary,
+      const agentMessages: AgentMessage[] = withMemory(
+        withSummary(withAttachments(baseMessages, attachments), sessionSummary),
+        memoryText,
       );
 
       const result = await runAgent({
@@ -130,17 +139,27 @@ export function useStreamChat(): UseStreamChatReturn {
         result.usage?.total_tokens ?? undefined,
       );
 
-      // AI 辅助摘要生成（异步，不阻塞 UI）。
-      // 注意：这里必须喂「助手回复正文 + 工具结果」，不能喂用户输入
-      //（早期版本传的是 content 参数＝用户消息，摘要内容因此完全跑偏）。
-      // 另外 generateSummary 内部已经把异常吞成空串，所以 fallback 要在 then 里判断，
-      // 原来的 .catch(fallback) 永远不会触发。
-      generateSummary(contentWithTools, result.toolLogs).then((summary) => {
-        const text = summary || contentWithTools.substring(0, 200).trim();
-        if (text) {
-          tauriInvoke('save_session_summary', { sessionId, summary: text }).catch(() => {});
-        }
-      });
+      // 每轮结束后的记忆维护（异步，不阻塞 UI）：
+      // 一次调用同时产出「会话摘要」与「新的长期事实」——
+      // 摘要进 session_summaries（服务本会话），事实去重后进记忆文档（服务跨会话）。
+      // 注意必须喂「助手回复正文 + 工具结果」，不能喂用户输入（早期版本传错，摘要跑偏）。
+      generateTurnInsight(contentWithTools, result.toolLogs, memoryText)
+        .then((insight) => {
+          const summary = insight.summary || contentWithTools.substring(0, 200).trim();
+          if (summary) {
+            tauriInvoke('save_session_summary', { sessionId, summary }).catch((err) =>
+              console.warn('[memory] 会话摘要保存失败', err),
+            );
+          }
+          if (insight.facts.length) {
+            appendMemoryFacts(turnId, insight.facts)
+              .then((added) => {
+                if (added > 0) void maybeCompactMemory();
+              })
+              .catch((err) => console.warn('[memory] 长期记忆写入失败', err));
+          }
+        })
+        .catch((err) => console.warn('[memory] 记忆维护失败', err));
       updateMessage(sessionId, assistantId, {
         id: saved.id,
         content: saved.content,
@@ -217,6 +236,27 @@ function riskLevelOf(toolName: string): string {
   return TOOL_RISK_LEVELS[toolName] ?? 'L2';
 }
 
+// ========== 长期记忆注入 ==========
+
+/**
+ * 把长期记忆作为 system 消息注入，放在会话摘要之前。
+ * 提示词里明确要求"不要主动复述、也不要据此覆盖用户当下的明确要求"，
+ * 避免记忆喧宾夺主。
+ */
+function withMemory(messages: AgentMessage[], memory: string): AgentMessage[] {
+  const block = memory.trim();
+  if (!block) return messages;
+  const content =
+    '【长期记忆】\n以下是此前对话中沉淀下来的、关于用户的长期事实与偏好，可作为背景参考：\n' +
+    '（不要主动逐条复述；如果与用户当下的明确要求冲突，以当下要求为准）\n\n' +
+    block;
+  const first = messages[0];
+  if (first?.role === 'system') {
+    return [{ role: 'system', content: `${content}\n\n${first.content}` }, ...messages.slice(1)];
+  }
+  return [{ role: 'system', content }, ...messages];
+}
+
 // ========== Session Summary 注入 ==========
 
 function withSummary(messages: AgentMessage[], summary: string): AgentMessage[] {
@@ -234,46 +274,6 @@ function withSummary(messages: AgentMessage[], summary: string): AgentMessage[] 
   return [{ role: 'system', content: summaryBlock }, ...messages];
 }
 
-async function generateSummary(content: string, toolLogs: {name:string;output:string;success:boolean}[]): Promise<string> {
-  // 用 Agent 生成摘要：把最后一轮的 assistant 回复 + 工具结果作为输入
-  try {
-    const config: any = await tauriInvoke('get_agent_config');
-    if (!config?.data?.port) return '';
-    const keyRes: any = await tauriInvoke('get_api_key');
-    const token = keyRes?.data || '';
-    const toolInfo = toolLogs.map((l) => l.name + ': ' + (l.success ? 'OK' : 'FAIL')).join(', ');
-    const prompt = '请用一句简洁的中文总结本轮对话的关键事实和结果（不超过100字）。工具调用：' + (toolInfo || '无') + '\n回复内容：' + content.substring(0, 500);
-    const res = await fetch('http://127.0.0.1:' + config.data.port + '/agent/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-LocalMind-Token': config.data.token },
-      body: JSON.stringify({ mode: 'online', model: 'deepseek-flash', messages: [{ role: 'user', content: prompt }], token }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok || !res.body) return '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let summary = '';
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const events = buf.split('\n\n');
-      buf = events.pop() || '';
-      for (const ev of events) {
-        if (!ev.trim().startsWith('data: ')) continue;
-        try {
-          const obj = JSON.parse(ev.trim().slice(6));
-          if (obj.type === 'delta') summary += obj.text || '';
-          if (obj.type === 'done') summary = obj.content ?? summary;
-        } catch {}
-      }
-    }
-    reader.releaseLock();
-    return summary.trim().substring(0, 200);
-  } catch { return ''; }
-}
-
 // ========== 工具调用嵌入（跨轮记忆修复） ==========
 
 const FINAL_REPLY_MARKER = '[最终回复]';
@@ -288,6 +288,7 @@ function embedToolLogs(content: string, toolLogs: { name: string; args: string; 
   // 否则 Python 侧无法区分最后一个工具的输出和助手正文。
   return blocks.join('\n') + '\n' + FINAL_REPLY_MARKER + '\n' + content;
 }
+
 // ========== 附件注入 ==========
 
 interface ConvMsg {
