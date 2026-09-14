@@ -85,17 +85,17 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
     }
 
-    val deviceToken: Flow<String> = encryptedFlow(KEY_DEVICE_TOKEN.name)
+    val deviceToken: Flow<String> = encryptedFlow(KEY_DEVICE_TOKEN.name, mirrorPlaintext = true)
 
     suspend fun setDeviceCredentials(id: String, token: String) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVICE_ID] = id }
-        setEncrypted(KEY_DEVICE_TOKEN.name, token)
+        setEncrypted(KEY_DEVICE_TOKEN.name, token, mirrorPlaintext = true)
     }
 
     // Account session（access/refresh token 属于凭据，加密存储）
-    val accountAccessToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_ACCESS_TOKEN.name)
+    val accountAccessToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_ACCESS_TOKEN.name, mirrorPlaintext = true)
 
-    val accountRefreshToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_REFRESH_TOKEN.name)
+    val accountRefreshToken: Flow<String> = encryptedFlow(KEY_ACCOUNT_REFRESH_TOKEN.name, mirrorPlaintext = true)
 
     val accountEmail: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_ACCOUNT_EMAIL] ?: ""
@@ -115,8 +115,8 @@ class PreferencesManager(private val context: Context) {
             prefs[KEY_ACCOUNT_EMAIL] = email
             prefs[KEY_ACCOUNT_DISPLAY_NAME] = displayName
         }
-        setEncrypted(KEY_ACCOUNT_ACCESS_TOKEN.name, accessToken)
-        setEncrypted(KEY_ACCOUNT_REFRESH_TOKEN.name, refreshToken)
+        setEncrypted(KEY_ACCOUNT_ACCESS_TOKEN.name, accessToken, mirrorPlaintext = true)
+        setEncrypted(KEY_ACCOUNT_REFRESH_TOKEN.name, refreshToken, mirrorPlaintext = true)
     }
 
     suspend fun clearAccountSession() {
@@ -184,39 +184,38 @@ class PreferencesManager(private val context: Context) {
     // 兼容策略：
     //  - 首次读到旧版本写入 DataStore 的明文 → 迁移进加密存储并删除明文；
     //  - 加密层不可用（Keystore 异常/恢复出厂）时退回 DataStore，保证功能不中断。
-    private fun encryptedFlow(key: String): Flow<String> = flow {
+    private fun encryptedFlow(key: String, mirrorPlaintext: Boolean = false): Flow<String> = flow {
         val encrypted = runCatching { EncryptedPrefs.getString(context, key) }.getOrNull().orEmpty()
         if (encrypted.isNotEmpty()) {
             emit(encrypted)
             return@flow
         }
+        // 密文读不到（首次迁移、Keystore 失效、写入未落盘）→ 退回 DataStore 明文
         val legacyKey = stringPreferencesKey(key)
         val legacy = context.dataStore.data.map { it[legacyKey] ?: "" }.first()
         if (legacy.isNotEmpty()) {
-            val migrated = runCatching {
-                EncryptedPrefs.putString(context, key, legacy)
-                true
-            }.getOrDefault(false)
-            if (migrated) {
+            val migrated = runCatching { EncryptedPrefs.putString(context, key, legacy) }.getOrDefault(false)
+            // 设备/账号 token 保留明文副本作为兜底（丢了会让手机被当成新设备重新注册）；
+            // DeepSeek Key 不保留副本，迁移成功即清除明文。
+            if (migrated && !mirrorPlaintext) {
                 context.dataStore.edit { prefs -> prefs.remove(legacyKey) }
             }
         }
         emit(legacy)
     }
 
-    private suspend fun setEncrypted(key: String, value: String) {
+    private suspend fun setEncrypted(key: String, value: String, mirrorPlaintext: Boolean = false) {
         val legacyKey = stringPreferencesKey(key)
         if (value.isEmpty()) {
             runCatching { EncryptedPrefs.remove(context, key) }
             context.dataStore.edit { prefs -> prefs.remove(legacyKey) }
             return
         }
-        val encrypted = runCatching {
-            EncryptedPrefs.putString(context, key, value)
-            true
-        }.getOrDefault(false)
+        val encryptedOk = runCatching { EncryptedPrefs.putString(context, key, value) }.getOrDefault(false)
         context.dataStore.edit { prefs ->
-            if (encrypted) prefs.remove(legacyKey) else prefs[legacyKey] = value
+            // mirrorPlaintext=true：始终保留一份明文兜底，避免密文层异常导致凭据彻底丢失；
+            // mirrorPlaintext=false（DeepSeek Key）：加密成功就清掉明文。
+            if (encryptedOk && !mirrorPlaintext) prefs.remove(legacyKey) else prefs[legacyKey] = value
         }
     }
 
