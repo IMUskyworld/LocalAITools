@@ -94,7 +94,13 @@ class RelayWssClient(
                         if (terminal.compareAndSet(false, true)) {
                             val code = json.optString("error_code")
                             val msg = json.optString("result_text").ifEmpty { json.optString("message") }
-                            onError("Relay 拒绝（${code}）：" + msg)
+                            // 402001：电脑端不在线（中继直接拒绝，不排队）→ 给用户看得懂的提示
+                            val friendly = if (code == "402001") {
+                                "电脑端不在线：请先在电脑上打开 LocalMind 并确认已登录，再发送指令"
+                            } else {
+                                null
+                            }
+                            onError(friendly ?: "Relay 拒绝（${code}）：$msg")
                         }
                         return
                     }

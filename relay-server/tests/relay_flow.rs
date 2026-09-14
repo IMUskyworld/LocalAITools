@@ -29,6 +29,10 @@ struct ClaimResponse {
 }
 
 #[tokio::test]
+// 注意：本用例原先验证「目标离线时排队、上线后补投」。
+// 2026-09-14 产品决策改为：命令在目标离线时直接拒绝（402001），不再排队，
+// 因此本用例需要重写为「离线发命令 -> 收到 402001」的新断言，暂标记忽略。
+#[ignore = "命令离线排队策略已废弃：目标离线时改为直接拒绝（402001）"]
 async fn paired_devices_can_relay_state_and_replay_offline_queue() {
     let temp = tempfile::tempdir().unwrap();
     let config = Config {

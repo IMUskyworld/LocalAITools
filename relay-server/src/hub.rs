@@ -25,6 +25,11 @@ impl Hub {
             .unwrap_or(false)
     }
 
+    /// 该设备当前是否有活跃的 WebSocket 连接。
+    pub fn is_connected(&self, device_id: &str) -> bool {
+        self.senders.contains_key(device_id)
+    }
+
     pub fn unregister(&self, device_id: &str, connection_id: Uuid) {
         if let Some(entry) = self.senders.get(device_id) {
             if entry.value().0 == connection_id {

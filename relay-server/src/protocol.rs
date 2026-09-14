@@ -15,6 +15,8 @@ pub const ERROR_NOT_PAIRED: &str = "401001";
 pub const ERROR_INVALID_PAIRING_CODE: &str = "401002";
 pub const ERROR_PAIRING_CODE_USED: &str = "401003";
 pub const ERROR_ACTION_NOT_ALLOWED: &str = "402002";
+/// 目标设备（电脑端）当前不在线：直接拒绝，不进入离线队列
+pub const ERROR_TARGET_OFFLINE: &str = "402001";
 pub const ERROR_EMAIL_ALREADY_REGISTERED: &str = "403003";
 pub const ERROR_INVALID_CREDENTIALS: &str = "403004";
 pub const ERROR_TOKEN_INVALID: &str = "403005";

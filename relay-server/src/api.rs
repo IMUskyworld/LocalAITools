@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use crate::protocol::ERROR_TARGET_OFFLINE;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -372,6 +373,15 @@ async fn process_command(
     envelope: CommandEnvelope,
 ) -> Result<()> {
     ensure_pair_route(state, device, &envelope)?;
+    // 产品决策：目标电脑端不在线时【直接拒绝】，不再进离线队列。
+    // 理由：排队会让手机等到超时后看到 socket 报错，用户完全无法判断问题；
+    // 现在手机端会立刻收到 402001（REMOTE_DEVICE_OFFLINE）并提示「电脑端不在线」。
+    if !state.hub.is_connected(&envelope.to_device_id) {
+        return Err(RelayError::conflict(
+            ERROR_TARGET_OFFLINE,
+            "target device is offline",
+        ));
+    }
     let json = serde_json::to_string(&envelope)?;
     let record = state.db.insert_command_and_enqueue(
         &envelope,
