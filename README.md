@@ -181,9 +181,9 @@ Key 只保存在本地，仓库与安装包里都不含任何 key。
 
 | 文件 | 平台 | 版本 / 大小 | SHA256 |
 | --- | --- | --- | --- |
-| `LocalMindSetup.exe` | Windows | v0.3.2 · 53.8 MB | `20C6A54733598EECA98BEABACED273E803B17AFED572BA6C26B16A0E75BB1724` |
-| `LocalMind.exe` | Windows | v0.3.2 免安装单文件 · 22.4 MB | `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE` |
-| `LocalFile.apk` | Android | v0.3.2 (versionCode 3) · 16.8 MB | `EFAC33577F76731A039B9B501846B37F8522BEFE63E607A1AD16622F8C134BA1` |
+| `LocalMindSetup.exe` | Windows | v0.3.2 · 53.8 MB | `276A3D2125A6A4C0F6F423DD8ECFB7F836C20FEEFA964A353B9E5B47D373678D` |
+| `LocalMind.exe` | Windows | v0.3.2 免安装单文件 · 22.4 MB | `1F7C9B95989EF6DBCAE6C61F205FCE352C006F34E70EDCEFB72529FC963374C2` |
+| `LocalFile.apk` | Android | v0.3.2 (versionCode 3) · 16.8 MB | `CC1EA7E022097DBF63EE3D7C9F639B6B425A36D8A0402EDB02D21C0C0EE36A11` |
 
 > Windows 安装包已内置 Python Agent 与文档生成器，**装完即用，无需另外安装 Python / Office**。
 > 免安装版需把 `LocalMind.exe` 与 `LocalMindScripts/` 放在同一目录。

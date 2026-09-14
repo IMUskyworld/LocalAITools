@@ -48,8 +48,9 @@
   ③ `installer.nsi` 的 `APP_VERSION` 还是 0.3.0（控制面板显示旧版本）→ 改为 0.3.2。
   ④ **Android 无谓权限**：zxing（扫码）依赖在代码里从未调用，却在 manifest 合并时注入 `CAMERA` 权限 → 移除依赖（APK 17.3MB → 16.8MB），相机权限消失。
   ⑤ Android `allowBackup="true"` + `usesCleartextTraffic="true"`：前者会把本地会话与加密凭据纳入云备份（Keystore 凭据跨设备也恢复不了），后者允许明文 HTTP 降级且代码里没有明文请求 → 分别改为 `allowBackup=false`、移除 cleartext 开关。
+- **远控链路加固（2026-09-15 凌晨）**：① Windows 端 WSS 握手缺 `Sec-WebSocket-*` 头 → 中继一直拒绝、电脑端从未真正在线（已补全，实测 `已连接 ✅`）；② `relayManager.ts` 在无当前会话时静默 `return` 丢弃远程命令（改为自动建会话，失败也必回 `failed`，手机不会干等）；③ **重复连接**：同一设备可能开两条 WSS，hub 以 device_id 为键、后注册顶掉前一条，先断的是后一条就会让中继误判设备离线 → `connect_relay_wss` 现在先关旧连接，App 退出时也主动断开；④ 重连从"连败 10 次放弃"改为持续重试（封顶 30s）；⑤ 手机端等待窗口 90s → 6 分钟（生成 PPT 类任务需要），状态文案改为"已发送，等待电脑执行"。
 - **需求核对**：见 `开发计划/需求完成度核对.md`（六项主需求 + 16 条优化项逐条状态；唯一未完成项是「长期记忆自动沉淀」）。
-- **已打包（v0.3.2，2026-09-14 含长期记忆 + 产物复查修复）**：`LocalMind.exe`（22.4MB，SHA256 `E5B1EABE18FB31ADBA301A14E31D717959B52513DA5D9C7A55F0F9E23FFCF9BE`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `20C6A54733598EECA98BEABACED273E803B17AFED572BA6C26B16A0E75BB1724`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `EFAC33577F76731A039B9B501846B37F8522BEFE63E607A1AD16622F8C134BA1`）。
+- **已打包（v0.3.2，2026-09-15 含远控链路加固）**：`LocalMind.exe`（22.4MB，SHA256 `1F7C9B95989EF6DBCAE6C61F205FCE352C006F34E70EDCEFB72529FC963374C2`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `276A3D2125A6A4C0F6F423DD8ECFB7F836C20FEEFA964A353B9E5B47D373678D`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `CC1EA7E022097DBF63EE3D7C9F639B6B425A36D8A0402EDB02D21C0C0EE36A11`）。
 
 ## 关键决策（ADR 摘要）
 

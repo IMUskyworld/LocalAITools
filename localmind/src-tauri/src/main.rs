@@ -22,6 +22,8 @@ pub struct AppState {
     pub model_manager: Arc<tokio::sync::RwLock<model::ModelManager>>,
     pub storage: Arc<tokio::sync::RwLock<storage::StorageManager>>,
     pub agent_manager: Arc<agent_process::AgentManager>,
+    /// 当前 Relay WSS 连接句柄（保证同一设备只保留一条连接）
+    pub relay_wss: Arc<tokio::sync::Mutex<Option<relay_wss::RelayWssHandle>>>,
 }
 
 #[tokio::main]
@@ -34,8 +36,9 @@ async fn main() {
     let chat_engine = Arc::new(tokio::sync::RwLock::new(chat::ChatEngine::new(storage.clone())));
     let model_manager = Arc::new(tokio::sync::RwLock::new(model::ModelManager::new(storage.clone())));
     let agent_manager = Arc::new(agent_process::AgentManager::new());
+    let relay_wss = Arc::new(tokio::sync::Mutex::new(None));
 
-    let app_state = AppState { chat_engine, model_manager, storage, agent_manager };
+    let app_state = AppState { chat_engine, model_manager, storage, agent_manager, relay_wss };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -100,6 +103,13 @@ async fn main() {
                 // 应用退出时杀掉 Python Agent 子进程，避免孤儿进程占用端口
                 let state = app.state::<AppState>();
                 state.agent_manager.kill();
+                // 主动关闭 Relay 连接，避免退出后中继仍认为本机在线
+                let relay = state.relay_wss.clone();
+                tauri::async_runtime::block_on(async move {
+                    if let Some(mut handle) = relay.lock().await.take() {
+                        handle.shutdown();
+                    }
+                });
             }
         });
 }

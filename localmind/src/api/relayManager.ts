@@ -86,10 +86,27 @@ export async function startRelayListener(): Promise<void> {
       sendNotification({ title: 'LocalMind 远程命令', body: intentText.substring(0, 200) });
     } catch {}
 
-    // 在当前 session 显示远程命令为系统消息
+    // 在当前 session 显示远程命令为系统消息。
+    // 若当前没有会话（例如刚启动、上一轮被删），要【自动建一个】，
+    // 否则旧实现会直接 return —— 手机端收不到任何状态，只能干等到超时，
+    // 这正好是「发指令没反应」的一种成因。
     const store = useChatStore.getState();
-    const sessionId = store.currentSessionId;
-    if (!sessionId) return;
+    let sessionId = store.currentSessionId;
+    if (!sessionId) {
+      try {
+        sessionId = await store.createSession('远程控制');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        try {
+          await tauriInvoke('send_relay_state', {
+            baseUrl, deviceId: device.device_id, deviceToken: device.device_token,
+            toDeviceId: fromDeviceId, tenantId, commandId,
+            stateValue: 'failed', resultText: `电脑端无法创建会话：${msg}`,
+          });
+        } catch {}
+        return;
+      }
+    }
 
     store.addMessage(sessionId, {
       id: generateId(),

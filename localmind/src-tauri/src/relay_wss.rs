@@ -52,6 +52,13 @@ pub struct RelayWssHandle {
 }
 
 impl RelayWssHandle {
+    /// 通知后台任务停止（用于「重新连接前先关掉旧连接」）。
+    pub fn shutdown(&mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+    }
+
     pub fn is_connected(&self) -> bool {
         // 非阻塞检查（tokio Mutex 需要 await，这里用 try_lock）
         self.state.try_lock().map(|s| s.connected).unwrap_or(false)
@@ -261,11 +268,23 @@ pub async fn start_relay_wss(
 #[tauri::command]
 pub async fn connect_relay_wss(
     app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     base_url: String,
     device_id: String,
     device_token: String,
 ) -> Result<(), String> {
-    start_relay_wss(app_handle, base_url, device_id, device_token).await?;
+    // 先停掉上一条连接：Relay 的 hub 以 device_id 为键，后注册的会顶掉前一条。
+    // 若同一个设备开着两条 WSS（例如重复启动/前端重复挂载），先断掉的那条会导致
+    // 中继侧认为设备「离线」，而另一条其实还连着 —— 表现就是手机偶尔报「电脑端不在线」。
+    {
+        let mut slot = state.relay_wss.lock().await;
+        if let Some(mut old) = slot.take() {
+            old.shutdown();
+            crate::storage::diag_log_pub("relay: 检测到重复连接请求，已先关闭上一条");
+        }
+    }
+    let handle = start_relay_wss(app_handle, base_url, device_id, device_token).await?;
+    *state.relay_wss.lock().await = Some(handle);
     Ok(())
 }
 /// 发送状态回传到 Relay（如 running / done / failed）。

@@ -236,7 +236,11 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             // \u65ad\u7ebf\u81ea\u52a8\u91cd\u8bd5\uff1a\u590d\u7528\u540c\u4e00\u4e2a commandId\uff0c
             // Relay \u4fa7\u636e\u6b64\u5e42\u7b49\u53bb\u91cd\uff0c\u4e0d\u4f1a\u91cd\u590d\u6267\u884c\u4efb\u52a1\u3002
             val commandId = java.util.UUID.randomUUID().toString()
-            val maxAttempts = 3
+            // 每次等待 60 秒、最多 6 次 ≈ 6 分钟。
+            // 旧值是 3×30s = 90 秒 —— 生成 PPT/文档这类任务要 1~3 分钟，
+            // 手机必然在电脑完成前就放弃（重连时会收到 Relay 缓存的 done 状态）。
+            val maxAttempts = 6
+            val perAttemptTimeoutMs = 60_000L
             var attempt = 0
             // 终态标志：收到 done/failed 后置位。OKHttp 回调在其自己的线程上，
             // 且命令完成后连接关闭会补一次 onFailure，因此用原子类型跨线程共享。
@@ -267,7 +271,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                     intentText = intentText,
                     commandId = commandId,
                     onConnected = {
-                        _state.update { it.copy(statusMessage = "\u5df2\u8fde\u63a5\uff0c\u7b49\u5f85\u6267\u884c...") }
+                        _state.update { it.copy(statusMessage = "\u5df2\u53d1\u9001\uff0c\u7b49\u5f85\u7535\u8111\u6267\u884c\uff08\u590d\u6742\u4efb\u52a1\u53ef\u80fd\u9700\u8981\u51e0\u5206\u949f\uff09...") }
                     },
                     onStateUpdate = { update ->
                         when (update.state) {
@@ -315,8 +319,8 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                     }
                 )
 
-                // \u7b49\u5f85\u672c\u6b21\u5c1d\u8bd5\u7ed3\u675f\uff08\u6210\u529f\u3001\u5931\u8d25\u6216 30s \u8d85\u65f6\uff09
-                val settled = withTimeoutOrNull(30_000L) { doneSignal.await() } ?: false
+                // 等待本次尝试结束（成功、失败或超时；超时后重连会收到 Relay 缓存的最终状态）
+                val settled = withTimeoutOrNull(perAttemptTimeoutMs) { doneSignal.await() } ?: false
                 if (settled || finished.get()) break
             }
 
