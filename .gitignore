@@ -68,5 +68,10 @@ __pycache__/
 # Phase 1 raw eval reports
 localmind/scripts/eval_reports/
 
+# Agent 调试用账号/设备凭据缓存（含 token，禁止入库）
+_acct.json
+_demo.json
+_demo-*.json
+
 # Relay local data
 relay-server/data/
