@@ -29,13 +29,17 @@ let stopListening: (() => void) | null = null;
 export async function startRelayListener(): Promise<void> {
   if (stopListening) return; // 已启动
 
-  // 检查是否有设备凭据
-  const stored: any = await tauriInvoke('get_api_key').catch(() => null);
-  // 设备凭据存在时才连接（通过 account store 检查）
-  const authRaw = localStorage.getItem('localmind-account-auth');
+  // 只要【设备凭据】存在就连中继。
+  //
+  // 注意不能用账号会话来判断：Relay 的连接与命令路由只认设备 token，
+  // 而账号会话是 30 分钟 access + 刷新失败即被清掉的。
+  // 旧实现要求 localmind-account-auth 也存在 —— 一旦账号会话过期被清理
+  // （打开「账号」页触发 initialize() 时最容易发生），电脑端从此不再连中继，
+  // 界面上却一切正常，手机端则永远显示「电脑端不在线」。
   const deviceRaw = localStorage.getItem('localmind-relay-device');
-  if (!authRaw || !deviceRaw) {
-    // 游客模式，不连接 WSS
+  if (!deviceRaw) {
+    // 从未登记过设备（游客模式），不连接 WSS
+    console.log('[Relay] 没有设备凭据，跳过中继连接（游客模式）');
     return;
   }
 

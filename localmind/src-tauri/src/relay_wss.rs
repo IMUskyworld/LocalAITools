@@ -43,6 +43,8 @@ struct WssState {
     connected: bool,
     destroyed: bool,
     reconnect_attempts: u32,
+    /// 连接建立后可用的出站通道：send_relay_state 通过它把状态信封直接发到 WS。
+    outbound: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 /// 全局 WSS 连接句柄（每个应用实例一个）。
@@ -52,6 +54,22 @@ pub struct RelayWssHandle {
 }
 
 impl RelayWssHandle {
+    /// 通过已建立的 WebSocket 发送一个信封（状态回传走这里）。
+    ///
+    /// 为什么不用 HTTP：中继的路由表里【没有】 `/v1/control/state`，
+    /// Windows 端却一直在 POST 它 → 404 → 手机永远收不到 running/done，
+    /// 只能重试到超时（实测就是这么坏的）。WS 通道本身已有 process_state 处理逻辑。
+    pub async fn send_text(&self, payload: String) -> Result<(), String> {
+        let guard = self.state.lock().await;
+        if !guard.connected {
+            return Err("Relay 尚未连接".to_string());
+        }
+        match &guard.outbound {
+            Some(tx) => tx.send(payload).map_err(|_| "Relay 连接已断开".to_string()),
+            None => Err("Relay 连接尚未就绪".to_string()),
+        }
+    }
+
     /// 通知后台任务停止（用于「重新连接前先关掉旧连接」）。
     pub fn shutdown(&mut self) {
         if let Some(tx) = self.shutdown.take() {
@@ -101,6 +119,7 @@ pub async fn start_relay_wss(
         connected: false,
         destroyed: false,
         reconnect_attempts: 0,
+        outbound: None,
     }));
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -171,6 +190,9 @@ pub async fn start_relay_wss(
                     let (mut write, mut read) = ws_stream.split();
                     let hb_state = state_clone.clone();
                     let mut hb_interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+                    // 出站通道：前端调用 send_relay_state 时经此写入
+                    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                    state_clone.lock().await.outbound = Some(out_tx);
 
                     loop {
                         tokio::select! {
@@ -194,6 +216,11 @@ pub async fn start_relay_wss(
                                 if write.send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&hb).unwrap_or_default()
                                 )).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Some(payload) = out_rx.recv() => {
+                                if write.send(tokio_tungstenite::tungstenite::Message::Text(payload)).await.is_err() {
                                     break;
                                 }
                             }
@@ -227,7 +254,11 @@ pub async fn start_relay_wss(
                         }
                     }
 
-                    state_clone.lock().await.connected = false;
+                    {
+                        let mut s = state_clone.lock().await;
+                        s.connected = false;
+                        s.outbound = None;
+                    }
                     let _ = app_handle.emit("relay-wss-connected", false);
                     crate::storage::diag_log_pub("relay: 连接已断开，准备重连");
                     tracing::info!("relay wss disconnected");
@@ -287,9 +318,13 @@ pub async fn connect_relay_wss(
     *state.relay_wss.lock().await = Some(handle);
     Ok(())
 }
-/// 发送状态回传到 Relay（如 running / done / failed）。
+/// 发送状态回传到 Relay（running / done / failed）。
+///
+/// 走 WebSocket：中继只在 WS 上实现了 process_state，HTTP 侧没有对应路由。
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn send_relay_state(
+    state: tauri::State<'_, crate::AppState>,
     base_url: String,
     device_id: String,
     device_token: String,
@@ -316,22 +351,11 @@ pub async fn send_relay_state(
         error_code: None,
         timestamp: chrono::Utc::now().timestamp_millis(),
     };
+    let payload = serde_json::to_string(&env).map_err(|e| format!("serialize state failed: {e}"))?;
 
-    // 通过 HTTP relay_request 发送状态（复用 TLS 通道）
-    let client = crate::relay_http::build_client().map_err(|e| format!("build client: {e}"))?;
-    let url = format!("{}/v1/control/state", base_url.trim_end_matches('/'));
-    let resp = client.post(&url)
-        .header("Content-Type", "application/json")
-        .header("x-device-id", &env.from_device_id)
-        .header("x-device-token", &device_token)
-        .json(&env)
-        .send()
-        .await
-        .map_err(|e| format!("send state failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("relay returned error: {text}"));
+    let guard = state.relay_wss.lock().await;
+    match guard.as_ref() {
+        Some(handle) => handle.send_text(payload).await,
+        None => Err("Relay 尚未连接：状态未回传（等待重连后可重试）".to_string()),
     }
-    Ok(())
 }
