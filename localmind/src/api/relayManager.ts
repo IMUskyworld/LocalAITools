@@ -25,6 +25,29 @@ interface RelayCommandEnvelope {
 
 let stopListening: (() => void) | null = null;
 
+/** 写一条诊断日志到 %TEMP%\localmind-rust.log（失败不影响主流程）。 */
+function diag(message: string): void {
+  tauriInvoke('diag_log', { message }).catch(() => {});
+}
+
+/** 发送状态回传并记录结果（远程链路的关键打点）。 */
+async function sendState(
+  params: {
+    baseUrl: string; deviceId: string; deviceToken: string;
+    toDeviceId: string; tenantId?: string; commandId: string;
+    stateValue: string; resultText?: string;
+  },
+): Promise<void> {
+  try {
+    await tauriInvoke('send_relay_state', params);
+    diag(`relay 状态已回传: ${params.stateValue} cmd=${params.commandId.slice(0, 8)}`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    diag(`relay 状态回传失败: ${params.stateValue} cmd=${params.commandId.slice(0, 8)} err=${msg}`);
+    throw e;
+  }
+}
+
 /** 启动 Relay WSS 连接并监听远程命令。在 App 组件 mount 时调用。 */
 export async function startRelayListener(): Promise<void> {
   if (stopListening) return; // 已启动
@@ -71,6 +94,11 @@ export async function startRelayListener(): Promise<void> {
   stopListening = await listen<RelayCommandEnvelope>('relay-command', async (event) => {
     const env = event.payload;
     console.log('[Relay] received command:', env);
+    diag(
+      `relay 收到命令: cmd=${(env.command_id || env.id || '').slice(0, 8)} ` +
+      `from=${(env.from_device_id || '').slice(0, 8)} type=${env.type} action=${env.action_type} ` +
+      `text=${(env.intent_text || '').slice(0, 40)}`,
+    );
 
     if (env.type !== 'command' || env.action_type !== 'chat_task') {
       console.warn('[Relay] ignoring non-chat_task command:', env.action_type);
@@ -102,7 +130,7 @@ export async function startRelayListener(): Promise<void> {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         try {
-          await tauriInvoke('send_relay_state', {
+          await sendState({
             baseUrl, deviceId: device.device_id, deviceToken: device.device_token,
             toDeviceId: fromDeviceId, tenantId, commandId,
             stateValue: 'failed', resultText: `电脑端无法创建会话：${msg}`,
@@ -122,7 +150,7 @@ export async function startRelayListener(): Promise<void> {
 
     // 发送 running 状态
     try {
-      await tauriInvoke('send_relay_state', {
+      await sendState({
         baseUrl,
         deviceId: device.device_id,
         deviceToken: device.device_token,
@@ -156,7 +184,7 @@ export async function startRelayListener(): Promise<void> {
       });
 
       // 发送 done 状态
-      await tauriInvoke('send_relay_state', {
+      await sendState({
         baseUrl,
         deviceId: device.device_id,
         deviceToken: device.device_token,
@@ -179,7 +207,7 @@ export async function startRelayListener(): Promise<void> {
 
       // 发送 failed 状态
       try {
-        await tauriInvoke('send_relay_state', {
+        await sendState({
           baseUrl,
           deviceId: device.device_id,
           deviceToken: device.device_token,

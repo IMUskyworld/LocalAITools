@@ -64,6 +64,7 @@ async fn main() {
             chat_api::save_memory,
             chat_api::delete_memory,
             chat_api::search_memories,
+            chat_api::diag_log,
             chat_api::get_memory_doc,
             chat_api::save_memory_doc,
             chat_api::append_memory_facts,

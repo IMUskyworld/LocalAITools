@@ -49,9 +49,10 @@
   ④ **Android 无谓权限**：zxing（扫码）依赖在代码里从未调用，却在 manifest 合并时注入 `CAMERA` 权限 → 移除依赖（APK 17.3MB → 16.8MB），相机权限消失。
   ⑤ Android `allowBackup="true"` + `usesCleartextTraffic="true"`：前者会把本地会话与加密凭据纳入云备份（Keystore 凭据跨设备也恢复不了），后者允许明文 HTTP 降级且代码里没有明文请求 → 分别改为 `allowBackup=false`、移除 cleartext 开关。
 - **远控链路根治（2026-09-15）**：⑥ **状态回传走错通道** —— Windows 端一直 POST `/v1/control/state`，但中继路由表里**没有这个路由**（会 404），所以电脑端执行完的结果永远回不到手机，手机只能重试到超时。已改为通过**同一条 WebSocket** 发送状态信封（中继的 `process_state` 是现成的）。⑦ Windows 端连中继不再要求账号会话存在（原先账号过期被清理后，电脑端会永久停止连接中继，界面却毫无提示）。
+- **远控结果回不来的真凶（2026-09-15 下午）**：⑧ **信封里的显式 `null` 让中继整条丢弃** —— Windows 端 `RelayCommandEnvelope` 的可选字段是 `Option<String>`，`None` 会序列化成 `null`；而中继侧契约（`shared-contract/envelope/v1`）把这些字段声明为 `String + #[serde(default)]`，**`default` 只在字段缺失时生效，显式 `null` 直接解析失败**：中继回 `100001 json error: invalid type: null, expected a string` 并静默丢弃整个信封。后果：`running/done/failed` **全部**回不到手机（心跳同样是这个形状，一直被丢，中继侧 `last_seen` 早就不更新了）。修法：这些字段加 `#[serde(skip_serializing_if = "Option::is_none")]`，`None` 不出现在 JSON 里，`default` 就能兜底，**无需改服务端**。⑨ Android 远控页选中项不随配对刷新走：切账号/撤销配对后 `selectedTargetId` 仍指向已不存在的设备，点发送只会命中"目标设备无效"，而卡片复用上一轮的旧文案（看起来像链路失败）→ 现在刷新时校验选中项、失效自动选第一台，并把失败原因写进可见文本。**教训：新增跨端信封字段一律用 `String` + `#[serde(default)]`，发送侧对 `Option` 一律 `skip_serializing_if`，永远不要发显式 `null`。**
 - **远控链路加固（2026-09-15 凌晨）**：① Windows 端 WSS 握手缺 `Sec-WebSocket-*` 头 → 中继一直拒绝、电脑端从未真正在线（已补全，实测 `已连接 ✅`）；② `relayManager.ts` 在无当前会话时静默 `return` 丢弃远程命令（改为自动建会话，失败也必回 `failed`，手机不会干等）；③ **重复连接**：同一设备可能开两条 WSS，hub 以 device_id 为键、后注册顶掉前一条，先断的是后一条就会让中继误判设备离线 → `connect_relay_wss` 现在先关旧连接，App 退出时也主动断开；④ 重连从"连败 10 次放弃"改为持续重试（封顶 30s）；⑤ 手机端等待窗口 90s → 6 分钟（生成 PPT 类任务需要），状态文案改为"已发送，等待电脑执行"。
 - **需求核对**：见 `开发计划/需求完成度核对.md`（六项主需求 + 16 条优化项逐条状态；唯一未完成项是「长期记忆自动沉淀」）。
-- **已打包（v0.3.2，2026-09-15 含远控链路根治）**：`LocalMind.exe`（22.4MB，SHA256 `82C16732BA666EC9A40548FC28B7C7CFD427421D67F8C77CBA2DDC997EDDA1D1`）+ `LocalMindSetup.exe`（53.8MB，SHA256 `8C9EE34928E40D23F4EE478E8B4E520AEE364CB0AE65C460ED2A6A3592ADF322`）+ `LocalFile.apk`（16.8MB，versionCode 3，SHA256 `CC1EA7E022097DBF63EE3D7C9F639B6B425A36D8A0402EDB02D21C0C0EE36A11`）。
+- **已打包（v0.3.2，2026-09-15 含远控链路根治 + 状态信封 null 修复）**：`LocalMind.exe`（21.4MB，SHA256 `0283ADD4DF46726E743742ED657301AA5F20F22B3F1411B3B387698C533C2B69`）+ `LocalMindSetup.exe`（51.4MB，SHA256 `766BC80B24ED503673643E4D07ECEE38A48402832D179440DA767CC5703E4803`）+ `LocalFile.apk`（16.0MB，versionCode 3，SHA256 `395CC43E277E412B187FC89ABFC2955ABB1BBD2B7F3EF10AC4E0BA389FD91274`）。
 
 ## 关键决策（ADR 摘要）
 
@@ -69,6 +70,7 @@
 - **LIBCLANG_PATH** 必须指向 `C:\Users\world\AppData\Roaming\Python\Python311\site-packages\clang\native`（llama-cpp-sys 的 bindgen 需要 libclang.dll）
 - **cmake** 不在 PATH，用 CLion 自带：`C:\APP\CLion 2026.2.1\bin\cmake\win\x64\bin` 加进 PATH
 - **NSIS**：`C:\Users\world\AppData\Local\tauri\nsis-3.11\Bin\makensis.exe`
+- **Android 构建**：`cd localfile; .\gradlew.bat assembleRelease --console=plain`，产物 `localfile\app\build\outputs\apk\release\LocalFile.apk`（再复制到仓库根 `LocalFile.apk`）。⚠️ **必须用 JDK 17–21**：Android Studio 自带的 JBR 是 Java 25，Gradle 8.13 会直接抛 `java.lang.IllegalArgumentException: 25.0.2`。本机已装 Temurin 21 于 `C:\Users\world\.jdks\jdk-21.0.12.1+1`，构建前把 `$env:JAVA_HOME` 指向它即可。
 - 构建命令：`build-localmind.ps1` → `build-installer.ps1`（脚本默认路径可用 `LOCALMIND_*` 环境变量覆盖）
 - Agent 重新打包：`localmind\scripts\build\agent-venv\Scripts\python.exe localmind\scripts\pack_agent_exe.py`（venv 只装 pydantic-ai-slim[openai] + pyinstaller）
 - **key 存储**：`auth.json` 位于 `%APPDATA%\LocalMind\auth.json`（明文 JSON，字段 `deepseek_api_key`）。Rust `storage::get_api_key/set_api_key` 读写此文件；前端 `runAgent` 把它放进 `body.token` 传给 Python agent。**构建脚本不需要任何 key**。

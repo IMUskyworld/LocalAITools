@@ -20,6 +20,13 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const RECONNECT_BASE: Duration = Duration::from_secs(2);
 const MAX_RECONNECT: u32 = 10;
 
+/// Relay WSS 信封（Windows → Relay 方向）。
+///
+/// 注意：这里的可选字段必须 `skip_serializing_if`，不能序列化成显式 null。
+/// Relay 侧契约把这些字段声明为 String + #[serde(default)]，而 default 只在
+/// 字段【缺失】时生效；显式 null 会让中继报
+/// "json error: invalid type: null, expected a string" 并静默丢弃整个信封。
+/// 历史症状：电脑端命令执行成功，手机端却永远收不到 running/done。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayCommandEnvelope {
     pub version: String,
@@ -27,14 +34,23 @@ pub struct RelayCommandEnvelope {
     #[serde(rename = "type")]
     pub envelope_type: String,
     pub from_device_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub to_device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub command_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub intent_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub action_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub action_params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
     pub timestamp: i64,
 }
@@ -230,6 +246,12 @@ pub async fn start_relay_wss(
                                         match serde_json::from_str::<RelayCommandEnvelope>(&text) {
                                             Ok(env) => {
                                                 if env.envelope_type == "command" {
+                                                    crate::storage::diag_log_pub(&format!(
+                                                        "relay: 收到远程命令 cmd={} action={} from={}",
+                                                        env.command_id.clone().unwrap_or_default(),
+                                                        env.action_type.clone().unwrap_or_default(),
+                                                        env.from_device_id,
+                                                    ));
                                                     let _ = app_handle.emit("relay-command", &env);
                                                 }
                                             }
@@ -335,6 +357,11 @@ pub async fn send_relay_state(
     state_value: String,
     result_text: Option<String>,
 ) -> Result<(), String> {
+    // 先记日志再构造信封（String 会被 move 进去）
+    crate::storage::diag_log_pub(&format!(
+        "relay: 回传状态 {state_value} cmd={}",
+        &command_id[..command_id.len().min(8)]
+    ));
     let env = RelayCommandEnvelope {
         version: "v1".into(),
         id: uuid::Uuid::new_v4().to_string(),
@@ -352,7 +379,6 @@ pub async fn send_relay_state(
         timestamp: chrono::Utc::now().timestamp_millis(),
     };
     let payload = serde_json::to_string(&env).map_err(|e| format!("serialize state failed: {e}"))?;
-
     let guard = state.relay_wss.lock().await;
     match guard.as_ref() {
         Some(handle) => handle.send_text(payload).await,

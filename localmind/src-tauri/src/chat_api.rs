@@ -410,6 +410,13 @@ pub async fn open_memory_doc() -> Result<AppResponse<bool>, String> {
     }
 }
 
+/// 前端写入诊断日志（%TEMP%/localmind-rust.log），用于排查远程控制等链路问题。
+#[tauri::command]
+pub async fn diag_log(message: String) -> Result<AppResponse<bool>, String> {
+    crate::storage::diag_log_pub(&format!("[ui] {message}"));
+    Ok(AppResponse::ok(true))
+}
+
 #[tauri::command]
 pub async fn turn_fail(
     turn_id: String,

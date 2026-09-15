@@ -128,11 +128,23 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                         .toSet()
                 } catch (e: Exception) { emptySet() }
 
-                _state.update {
-                    it.copy(
+                _state.update { current ->
+                    // 选中项必须跟着最新配对列表走：切换账号 / 撤销配对 / 换机器后，
+                    // 旧的 selectedTargetId 会指向已不存在的设备，此时点发送只会得到
+                    // "目标设备无效"，而界面上还留着上一轮的旧结果 —— 很容易被误读成
+                    // 链路故障。这里失效就重置，没人选中时自动选第一台。
+                    val keepSelection = current.selectedTargetId?.let { id ->
+                        targets.any { it.targetDeviceId == id }
+                    } == true
+                    current.copy(
                         targets = targets,
                         requestable = requestable,
                         pendingRequestDeviceIds = pendingIds,
+                        selectedTargetId = if (keepSelection) current.selectedTargetId
+                                           else targets.firstOrNull()?.targetDeviceId,
+                        statusMessage = if (keepSelection) current.statusMessage else "",
+                        statusType = if (keepSelection) current.statusType else "",
+                        resultText = if (keepSelection) current.resultText else "",
                         loading = false,
                         error = if (targets.isEmpty()) {
                             "还没有可用于远控的电脑。请在电脑端账号页发起/批准一次控制授权配对。"
@@ -221,7 +233,16 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         // 从选中的目标解析出 tenant_id（Relay 路由必需）与目标设备 id
         val target = currentState.targets.firstOrNull { it.targetDeviceId == selectedId }
         if (target == null) {
-            _state.update { it.copy(isSending = false, statusType = "failed", statusMessage = "目标设备无效，请刷新后重试") }
+            // 把原因写进 resultText：结果卡片只渲染 statusType + resultText，
+            // 不写的话用户只会看到一个没有解释的"执行失败"。
+            _state.update {
+                it.copy(
+                    isSending = false,
+                    statusType = "failed",
+                    statusMessage = "目标设备无效",
+                    resultText = "未选中可用的电脑：请在上方「已配对设备」里点一下目标电脑，再发送指令。",
+                )
+            }
             return
         }
         val targetDeviceId = target.targetDeviceId
