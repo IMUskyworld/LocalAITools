@@ -710,7 +710,9 @@ fn default_db_path() -> Result<PathBuf, String> {
 
 fn open_connection(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(db_error)?;
-    conn.busy_timeout(Duration::from_millis(5000)).map_err(db_error)?;
+    // 15s：每个操作都会新开连接，写入之间会互相排队；
+    // 5s 在长会话（大消息 + 安全摘要写回）时不够，曾出现 "database is locked"。
+    conn.busy_timeout(Duration::from_millis(15000)).map_err(db_error)?;
     conn.pragma_update(None, "foreign_keys", "ON").map_err(db_error)?;
     conn.pragma_update(None, "synchronous", "NORMAL").map_err(db_error)?;
     let _: String = conn

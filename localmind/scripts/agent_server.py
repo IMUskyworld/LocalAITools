@@ -1040,7 +1040,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             content_parts = []
             tool_calls = {}
             started_at = time.time()
-            usage_limits = UsageLimits(request_limit=8, tool_calls_limit=12) if v2 else None
+            # 预算上限：给多步任务留出空间（2026-09-18 排查：limit=8 时
+            # 「一次生成 4 份文档」这类任务会在中途直接失败）
+            usage_limits = UsageLimits(request_limit=16, tool_calls_limit=24) if v2 else None
             async with agent.run_stream_events(
                 prompt,
                 message_history=history,
@@ -1158,10 +1160,27 @@ class AgentHandler(BaseHTTPRequestHandler):
         except Exception as e:
             try:
                 trace.finish("failed", error=str(e), tool_logs=tool_logs)
-                self._write_event({"type": "error", "message": str(e)})
+                self._write_event({"type": "error", "message": _friendly_error(e)})
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             _log(f"RUN_ERROR {e}")
+
+
+def _friendly_error(e: Exception) -> str:
+    """把框架/底层异常翻译成用户能看懂的中文提示。
+
+    2026-09-18：此前预算超限时直接把 pydantic-ai 的英文原文抛给用户
+    （"The next request would exceed the request_limit of 8..."），
+    用户完全看不懂任务为什么停了。
+    """
+    text = str(e)
+    name = type(e).__name__
+    if name == "UsageLimitExceeded" or "request_limit" in text or "tool_calls_limit" in text:
+        return ("本轮的模型请求次数已达上限，任务可能只完成了一部分。"
+                "可以直接说「继续」让我接着做，或者把任务拆成几步分别下达。")
+    if "database is locked" in text:
+        return "本地数据库正忙（可能有另一个窗口在写入），请稍后再试一次。"
+    return text
 
 
 # ========== 入口 ==========
