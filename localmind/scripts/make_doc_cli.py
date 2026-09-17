@@ -12,6 +12,44 @@ import os
 import sys
 
 
+# ---------- 输入规整（防御模型把"数组字段"写成字符串）----------
+# 背景：create_doc 的 spec 由模型生成，字段类型并不总是可靠。
+# 历史 bug（2026-09-18）：body 被传成字符串时，Python 迭代字符串会逐字符拆开，
+# 生成出来的 PDF 变成"每行一个字"，一份简介被撑成 45 页。
+def _as_list(value):
+    """把可能是字符串/字典/单值的字段规整成列表；字符串不会被拆成字符。"""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _as_text_list(value):
+    """规整"字符串数组"字段，并修复"整段话被逐字符拆开"的坏数据。"""
+    out = []
+    for item in _as_list(value):
+        if item is None:
+            continue
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            out.append(str(item.get("text", item.get("content", ""))))
+        else:
+            out.append(str(item))
+    stripped = [s for s in out if s.strip()]
+    # 整段话被逐字符拆开时拼回一段（用 out 拼接以保留空格）
+    if len(stripped) >= 5 and all(len(s.strip()) == 1 for s in stripped):
+        return ["".join(out)]
+    return out
+
+
+def _as_str(value, default=""):
+    if value is None:
+        return default
+    return value if isinstance(value, str) else str(value)
+
+
 # ========== PPT (from make_ppt.py) ==========
 
 def build_ppt(spec):
@@ -23,9 +61,9 @@ def build_ppt(spec):
     DARK = RGBColor(0x33, 0x33, 0x33)
 
     path = spec["path"]
-    title = spec.get("title", "演示文稿")
-    subtitle = spec.get("subtitle", "")
-    slides = spec.get("slides", [])
+    title = _as_str(spec.get("title"), "演示文稿")
+    subtitle = _as_str(spec.get("subtitle"))
+    slides = _as_list(spec.get("slides"))
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -46,16 +84,18 @@ def build_ppt(spec):
 
     # --- Content slides ---
     for s in slides:
+        if not isinstance(s, dict):
+            continue
         slide = prs.slides.add_slide(prs.slide_layouts[1])
         st = slide.shapes.title
-        st.text = s.get("title", "")
+        st.text = _as_str(s.get("title"))
         st.text_frame.paragraphs[0].font.size = Pt(32)
         st.text_frame.paragraphs[0].font.bold = True
         st.text_frame.paragraphs[0].font.color.rgb = ACCENT
 
         body = slide.placeholders[1].text_frame
         body.clear()
-        bullets = s.get("bullets", [])
+        bullets = _as_text_list(s.get("bullets"))
         for i, b in enumerate(bullets):
             p = body.paragraphs[0] if i == 0 else body.add_paragraph()
             p.text = b
@@ -76,26 +116,34 @@ def build_docx(spec):
     path = spec["path"]
     doc = Document()
 
-    title = spec.get("title", "")
+    title = _as_str(spec.get("title"))
     if title:
         doc.add_heading(title, 0)
 
-    meta = spec.get("meta", "")
+    meta = _as_str(spec.get("meta"))
     if meta:
         doc.add_paragraph(meta).italic = True
 
-    for h in spec.get("headings", []):
-        level = h.get("level", 1)
-        doc.add_heading(h.get("text", ""), level=level)
+    for h in _as_list(spec.get("headings")):
+        if not isinstance(h, dict):
+            continue
+        try:
+            level = int(h.get("level", 1))
+        except (TypeError, ValueError):
+            level = 1
+        doc.add_heading(_as_str(h.get("text")), level=level)
 
-    for p in spec.get("paragraphs", []):
-        doc.add_paragraph(p)
+    for p in _as_text_list(spec.get("paragraphs")):
+        if p.strip():
+            doc.add_paragraph(p)
 
-    for b in spec.get("bullets", []):
-        doc.add_paragraph(b, style="List Bullet")
+    for b in _as_text_list(spec.get("bullets")):
+        if b.strip():
+            doc.add_paragraph(b, style="List Bullet")
 
-    for n in spec.get("numbered", []):
-        doc.add_paragraph(n, style="List Number")
+    for n in _as_text_list(spec.get("numbered")):
+        if n.strip():
+            doc.add_paragraph(n, style="List Number")
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     doc.save(path)
@@ -111,10 +159,10 @@ def build_xlsx(spec):
     path = spec["path"]
     wb = Workbook()
     ws = wb.active
-    ws.title = spec.get("sheet_name", "Sheet1")
+    ws.title = _as_str(spec.get("sheet_name"), "Sheet1") or "Sheet1"
 
-    headers = spec.get("headers", [])
-    rows = spec.get("rows", [])
+    headers = _as_text_list(spec.get("headers"))
+    rows = _as_list(spec.get("rows"))
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
@@ -124,7 +172,7 @@ def build_xlsx(spec):
         cell.fill = header_fill
 
     for r, row in enumerate(rows, start=2):
-        for c, val in enumerate(row, start=1):
+        for c, val in enumerate(_as_list(row), start=1):
             ws.cell(row=r, column=c, value=val)
 
     for col in range(1, len(headers) + 1):
@@ -168,26 +216,32 @@ def build_pdf(spec):
     if use_cjk:
         pdf.add_font("CJK", "", font_path)
 
-    title = spec.get("title", "")
+    title = _as_str(spec.get("title"))
     if title:
         pdf.set_font("CJK" if use_cjk else "helvetica", "", 22)
         pdf.cell(0, 16, title, ln=True, align="C")
         pdf.ln(4)
 
-    subtitle = spec.get("subtitle", "")
+    subtitle = _as_str(spec.get("subtitle"))
     if subtitle:
         pdf.set_font("CJK" if use_cjk else "helvetica", "", 13)
         pdf.cell(0, 10, subtitle, ln=True, align="C")
         pdf.ln(8)
 
-    for section in spec.get("sections", []):
-        heading = section.get("heading", "")
+    # 注意：body 必须是"段落数组"。曾被模型传成单个字符串，
+    # 导致下面这个 for 逐字符迭代、每行只排一个字（见文件顶部说明）。
+    for section in _as_list(spec.get("sections")):
+        if not isinstance(section, dict):
+            continue
+        heading = _as_str(section.get("heading"))
         if heading:
             pdf.set_font("CJK" if use_cjk else "helvetica", "", 15)
             pdf.cell(0, 12, heading, ln=True)
             pdf.ln(2)
         pdf.set_font("CJK" if use_cjk else "helvetica", "", 11)
-        for body in section.get("body", []):
+        for body in _as_text_list(section.get("body")):
+            if not body.strip():
+                continue
             pdf.multi_cell(0, 7, body)
             pdf.ln(2)
         pdf.ln(4)
