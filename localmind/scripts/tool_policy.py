@@ -156,6 +156,15 @@ class ToolPolicy:
             "explorer.exe": self.windows_root / "explorer.exe",
         }
 
+    # open_app 不允许"打开"的、可被解析执行的后缀。
+    # 只挡 .exe 远远不够：.hta / .jar / .py / .scr / .cpl 双击同样会执行代码。
+    EXECUTABLE_SUFFIXES = frozenset({
+        ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe",
+        ".js", ".jse", ".wsf", ".wsh", ".msi", ".msp", ".lnk", ".reg",
+        ".scr", ".cpl", ".hta", ".jar", ".py", ".pyw", ".pif", ".msc",
+        ".gadget", ".application", ".msix", ".appx", ".appinstaller",
+    })
+
     def validate_open_target(self, target: str) -> tuple[str, str]:
         target = str(target or "").strip()
         if not target:
@@ -174,10 +183,7 @@ class ToolPolicy:
             return "app", str(app)
 
         path = self.canonicalize_path(target, must_exist=True)
-        if path.is_file() and path.suffix.lower() in {
-            ".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse",
-            ".wsf", ".wsh", ".msi", ".lnk", ".reg",
-        }:
+        if path.is_file() and path.suffix.lower() in self.EXECUTABLE_SUFFIXES:
             raise ToolPolicyError("不允许通过 open_app 启动任意可执行文件")
         in_models_root = self._is_relative_to(path, self.ollama_models_root)
         in_allowed_root = any(self._is_relative_to(path, root) for root in self.allowed_roots)

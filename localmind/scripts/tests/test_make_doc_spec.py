@@ -48,3 +48,26 @@ def test_pdf_builder_accepts_string_body(tmp_path):
     })
     assert result["success"] is True
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_column_letter_supports_beyond_z():
+    assert cli._column_letter(1) == "A"
+    assert cli._column_letter(26) == "Z"
+    assert cli._column_letter(27) == "AA"
+    assert cli._column_letter(28) == "AB"
+    assert cli._column_letter(52) == "AZ"
+    assert cli._column_letter(53) == "BA"
+
+
+def test_xlsx_sets_width_on_correct_columns_beyond_26(tmp_path):
+    """>26 列时列宽必须写到真正的列（旧实现会全写到 A）。"""
+    out = tmp_path / "wide.xlsx"
+    headers = [f"字段{i}" for i in range(1, 31)]
+    rows = [[f"值{i}" for i in range(1, 31)]]
+    result = cli.build_xlsx({"path": str(out), "sheet_name": "wide", "headers": headers, "rows": rows})
+    assert result["success"] is True
+    from openpyxl import load_workbook
+    ws = load_workbook(out).active
+    assert ws.column_dimensions["AA"].width and ws.column_dimensions["AA"].width > 0
+    assert ws.column_dimensions["AD"].width and ws.column_dimensions["AD"].width > 0
+    assert ws.column_dimensions["A"].width != ws.column_dimensions["AA"].width

@@ -111,3 +111,25 @@ def test_missing_file_is_file_not_found_not_policy_denied(tmp_path: Path):
     policy = policy_for(tmp_path)
     with pytest.raises(FileNotFoundError):
         policy.validate_read(tmp_path / "missing.txt")
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [".exe", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".msi", ".lnk",
+     ".scr", ".cpl", ".hta", ".jar", ".py", ".pyw", ".msc"],
+)
+def test_open_app_rejects_executable_suffixes(tmp_path: Path, suffix: str):
+    """open_app 不能用来启动可执行/脚本文件（2026-09-18 补全后缀黑名单）。"""
+    policy = policy_for(tmp_path)
+    payload = tmp_path / f"payload{suffix}"
+    payload.write_text("x", encoding="utf-8")
+    with pytest.raises(ToolPolicyError):
+        policy.validate_open_target(str(payload))
+
+
+def test_open_app_allows_plain_file(tmp_path: Path):
+    policy = policy_for(tmp_path)
+    doc = tmp_path / "readme.txt"
+    doc.write_text("hello", encoding="utf-8")
+    kind, value = policy.validate_open_target(str(doc))
+    assert kind == "path" and value.endswith("readme.txt")

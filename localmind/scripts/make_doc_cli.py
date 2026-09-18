@@ -44,6 +44,18 @@ def _as_text_list(value):
     return out
 
 
+def _column_letter(index: int) -> str:
+    """1 -> A, 26 -> Z, 27 -> AA。
+
+    旧实现用 chr(64 + col)，只对 A–Z 有效：超过 26 列时全部写到 A 列。
+    """
+    letters = ""
+    while index > 0:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
 def _as_str(value, default=""):
     if value is None:
         return default
@@ -175,13 +187,18 @@ def build_xlsx(spec):
         for c, val in enumerate(_as_list(row), start=1):
             ws.cell(row=r, column=c, value=val)
 
-    for col in range(1, len(headers) + 1):
-        max_len = len(str(headers[col - 1])) if headers else 0
+    # 列宽估算：覆盖表头与所有数据列（含比表头更宽的列行），
+    # 并用真正的列字母，支持 AA/AB… 超过 26 列的情况。
+    column_count = max([len(headers)] + [len(_as_list(row)) for row in rows] + [0])
+    for col in range(1, column_count + 1):
+        max_len = 0
+        if col <= len(headers):
+            max_len = len(str(headers[col - 1] or ""))
         for r in range(2, len(rows) + 2):
             v = ws.cell(row=r, column=col).value
             if v is not None:
                 max_len = max(max_len, len(str(v)))
-        ws.column_dimensions[chr(64 + col) if col <= 26 else "A"].width = max_len + 4
+        ws.column_dimensions[_column_letter(col)].width = min(max_len + 4, 60)
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     wb.save(path)
