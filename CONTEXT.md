@@ -55,12 +55,14 @@
 
 - **预算与数据库锁的两处修复（2026-09-18 深夜）**：⑪ Harness 预算对多步任务太紧 —— request_limit=8 / tool_calls_limit=12 让「一次生成 4 份文档」这类任务在中途直接失败，而且把 pydantic-ai 的英文原文抛给用户；改为 16 / 24，并新增 _friendly_error() 把预算超限翻译成中文可操作提示（「可以说继续，或拆成几步分别下达」）。⑫ database is locked —— storage 每个操作都新开连接，busy_timeout 5s 在长会话（大消息 + 摘要回写）下不够，提高到 15s。**教训：给用户看的错误必须中文且可操作；预算上限要按「最长的合理任务」来定。**
 
+- **远控申请「电脑端看不到」+ 移除设备报未处理异常（2026-09-18 傍晚修复）**：⑯ 待批的远控申请只在打开「账号」页时拉取一次，手机上发起申请后电脑端永远发现不了（除非退出重进该页）→ 改为 App 启动后全局每 5 秒轮询（窗口隐藏时跳过），新申请弹 Windows 通知。⑰ 点「移除」时若设备其实已不在账号里（列表是旧的 / 对方已自行解绑），后端返回 403007，前端直接把它抛成未处理的异步错误 → 现在 403007 视为「已移除」静默刷新列表，按钮处也吞掉 rejection（错误信息统一由 store 的 error 展示）。**教训：列表类数据要有轮询或焦点刷新；幂等操作要容忍「目标已不存在」。**
+
 - **两处小缺陷（2026-09-18 修复）**：⑭ open_app 的可执行后缀黑名单不全——只挡了 .exe/.bat/.ps1 等，.scr/.hta/.jar/.py/.cpl/.msc 同样可被「打开」从而执行；已改为 ToolPolicy.EXECUTABLE_SUFFIXES 常量并补全（新增 16 个测试用例）。⑮ Excel 生成器列宽超过 26 列时写错列——chr(64 + col) 只对 A–Z 有效，AA 以后全部写到 A 列；改为 _column_letter()（1→A、27→AA）并让列宽覆盖「表头 + 所有数据行」。
 
 - **会话被"僵尸 Turn"锁死（2026-09-18 中午修复）**：⑬ `turns` 上有"同一会话只允许一个 running"的偏索引；一旦上一轮**异常退出**（崩溃 / 被强杀 / 前端断开后没人收尾），那条 Turn 会永久留在 `running`，该会话之后**每条消息都会失败**（日志：`DB operation failed: 同一会话已有运行中的 Turn`）。修法：`StorageManager::with_paths` 启动时把所有 `running` 标记为 `interrupted`（此时不可能有真在跑的 Turn）；`begin_turn` 内再顺手把卡住超过 10 分钟的 Turn 标记为 `interrupted` 后继续。**教训：任何"单例"状态都要有超时/启动自愈，否则一次崩溃就是永久故障。**
 - **远控链路加固（2026-09-15 凌晨）**：① Windows 端 WSS 握手缺 `Sec-WebSocket-*` 头 → 中继一直拒绝、电脑端从未真正在线（已补全，实测 `已连接 ✅`）；② `relayManager.ts` 在无当前会话时静默 `return` 丢弃远程命令（改为自动建会话，失败也必回 `failed`，手机不会干等）；③ **重复连接**：同一设备可能开两条 WSS，hub 以 device_id 为键、后注册顶掉前一条，先断的是后一条就会让中继误判设备离线 → `connect_relay_wss` 现在先关旧连接，App 退出时也主动断开；④ 重连从"连败 10 次放弃"改为持续重试（封顶 30s）；⑤ 手机端等待窗口 90s → 6 分钟（生成 PPT 类任务需要），状态文案改为"已发送，等待电脑执行"。
 - **需求核对**：见 `开发计划/需求完成度核对.md`（六项主需求 + 16 条优化项逐条状态；唯一未完成项是「长期记忆自动沉淀」）。
-- **已打包（v0.3.2，2026-09-15 含远控链路根治 + 状态信封 null 修复；2026-09-18 更新含 PDF 修复）**：`LocalMind.exe`（21.4MB，SHA256 `788C6F8713E7AD47705AD8BBA2A104F7BD93176004DD7ED7C78D83B0CE6911BA`）+ `LocalMindSetup.exe`（51.4MB，SHA256 `810D8DE671FA3A8F1D590E9BE5385A3BB06D571D722EEC8FD8BDACAA2B19C211`）+ `LocalFile.apk`（16.0MB，versionCode 3，SHA256 `395CC43E277E412B187FC89ABFC2955ABB1BBD2B7F3EF10AC4E0BA389FD91274`）+ `LocalMindScripts/make_doc.exe`（24.5MB，SHA256 `11A46359EFFB96B7EAE040B1941E5E07B7718C1E122ECBC8AD945C5F80B69F80`）。
+- **已打包（v0.3.2，2026-09-15 含远控链路根治 + 状态信封 null 修复；2026-09-18 更新含 PDF 修复）**：`LocalMind.exe`（21.4MB，SHA256 `7EDCBF1C337E6B141503471ABFF795B7AD24CFB742773947F140DD7C3F09E263`）+ `LocalMindSetup.exe`（51.4MB，SHA256 `17F5B8908CF5AF33D875CB0233CA18C9C920D09A813DB767A2D67C7F13041B77`）+ `LocalFile.apk`（16.0MB，versionCode 3，SHA256 `395CC43E277E412B187FC89ABFC2955ABB1BBD2B7F3EF10AC4E0BA389FD91274`）+ `LocalMindScripts/make_doc.exe`（24.5MB，SHA256 `11A46359EFFB96B7EAE040B1941E5E07B7718C1E122ECBC8AD945C5F80B69F80`）。
 
 ## 关键决策（ADR 摘要）
 

@@ -19,7 +19,26 @@ import {
   removeAccountDevice,
   storeAuth,
 } from '@/api/account';
+import { sendNotification, requestPermission } from '@tauri-apps/plugin-notification';
 import { formatErrorMessage } from '@/utils/error-codes';
+
+/** 已经弹过通知的申请 id，避免每轮都提醒。 */
+const notifiedPairingRequestIds = new Set<string>();
+let pairingWatcherTimer: number | null = null;
+
+async function notifyPairingRequest(count: number): Promise<void> {
+  try {
+    await requestPermission();
+    sendNotification({
+      title: 'LocalMind 远控申请',
+      body: count === 1
+        ? '有设备申请远程控制本机，请在「账号」页批准或拒绝。'
+        : `有 ${count} 台设备申请远程控制本机，请在「账号」页批准或拒绝。`,
+    });
+  } catch {
+    // 通知不可用不影响主流程
+  }
+}
 
 type AccountStatus = 'guest' | 'loading' | 'authenticated';
 
@@ -39,6 +58,8 @@ interface AccountState {
   refreshDevices: () => Promise<void>;
   removeDevice: (deviceId: string) => Promise<void>;
   refreshPairingRequests: () => Promise<void>;
+  startPairingWatcher: () => void;
+  stopPairingWatcher: () => void;
   approvePairing: (requestId: string) => Promise<void>;
   rejectPairing: (requestId: string) => Promise<void>;
   clearError: () => void;
@@ -223,10 +244,55 @@ export const useAccountStore = create<AccountState>((set, get) => ({
       const devices = await withFreshAccessToken((token) => listAccountDevices(token));
       set({ devices });
     } catch (error) {
+      // 403007 = 该设备本来就不在这个账号里（列表是旧的，或对方已自行解绑）。
+      // 这不是失败：刷新一次列表即可，不要把原始异常抛到界面上
+      // （2026-09-18：此前会冒成「未处理的异步错误 RelayApiError」）。
+      if (error instanceof RelayApiError && error.code === '403007') {
+        try {
+          const devices = await withFreshAccessToken((token) => listAccountDevices(token));
+          set({ devices, error: null });
+          return;
+        } catch {
+          // 落到下面的通用错误处理
+        }
+      }
       set({ error: messageFor(error) });
       throw error;
     } finally {
       set({ busy: false });
+    }
+  },
+
+  /**
+   * 全局轮询「待本机批准的控制授权申请」。
+   *
+   * 背景（2026-09-18 实测）：此前只在打开「账号」页时拉取一次，
+   * 手机端发起申请后电脑端永远不会发现（除非退出再进那个页面）。
+   * 现在 App 启动后每 5 秒轮询一次（窗口隐藏时跳过），新申请弹系统通知。
+   */
+  startPairingWatcher: () => {
+    if (pairingWatcherTimer !== null) return;
+    const tick = async () => {
+      if (get().status !== 'authenticated') return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        await get().refreshPairingRequests();
+      } catch {
+        return;
+      }
+      const fresh = get().pairingRequests.filter((r) => !notifiedPairingRequestIds.has(r.id));
+      if (fresh.length === 0) return;
+      fresh.forEach((r) => notifiedPairingRequestIds.add(r.id));
+      void notifyPairingRequest(fresh.length);
+    };
+    void tick();
+    pairingWatcherTimer = window.setInterval(() => void tick(), 5000);
+  },
+
+  stopPairingWatcher: () => {
+    if (pairingWatcherTimer !== null) {
+      window.clearInterval(pairingWatcherTimer);
+      pairingWatcherTimer = null;
     }
   },
 

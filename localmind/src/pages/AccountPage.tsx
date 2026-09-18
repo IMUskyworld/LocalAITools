@@ -251,7 +251,11 @@ export default function AccountPage() {
                     {!isCurrent && (
                       <button
                         className="account-remove"
-                        onClick={() => void removeDevice(device.id)}
+                        onClick={() => {
+                          // 失败信息由 store 的 error 展示；这里吞掉 rejection，
+                          // 否则浏览器会冒「未处理的异步错误 RelayApiError」。
+                          void removeDevice(device.id).catch(() => {});
+                        }}
                         disabled={busy}
                         title="从账号中移除此设备"
                       >
