@@ -88,7 +88,7 @@ object ErrorCodes {
         DEVICE_NOT_ENROLLED to "设备尚未绑定到该账号",
         PAIRING_REQUEST_EXPIRED to "控制授权请求已过期",
         DEVICE_ALREADY_ENROLLED to "设备已绑定到其他账号",
-        PAIRING_REQUEST_CONFLICT to "控制授权请求状态冲突"
+        PAIRING_REQUEST_CONFLICT to "已有一条待电脑端批准的申请，请稍候或到电脑端处理"
     )
 
     fun getMessage(code: String): String = messages[code] ?: "未知错误 ($code)"

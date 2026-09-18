@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.localmind.localfile.common.AccountApiException
 import com.localmind.localfile.common.AccountClient
+import com.localmind.localfile.common.ErrorCodes
 import com.localmind.localfile.common.Logger
 import com.localmind.localfile.common.RelayWssClient
 import com.localmind.localfile.storage.PreferencesManager
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
@@ -61,6 +63,18 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
 
     init {
         refresh()
+
+        // 申请发出后自动轮询：电脑端一旦批准，手机这边 5 秒内就能看到，不必手动点刷新。
+        // 2026-09-18：此前只在进入页面时刷新一次，电脑端批准后手机一直停在
+        // 「等待电脑端确认…」，容易被误认为没生效。
+        viewModelScope.launch {
+            while (isActive) {
+                delay(5_000)
+                if (_state.value.pendingRequestDeviceIds.isNotEmpty()) {
+                    refresh(silent = true)
+                }
+            }
+        }
     }
 
     /**
@@ -70,9 +84,11 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
      * 页面会永远停在"暂无已配对设备"，且错误信息不显示。现在改为可重复调用，
      * 页面每次进入都会刷新，用户也能手动点刷新。
      */
-    fun refresh() {
+    fun refresh(silent: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
+            if (!silent) {
+                _state.update { it.copy(loading = true, error = null) }
+            }
 
             val token = prefs.accountAccessToken.first()
             if (token.isEmpty()) {
@@ -153,8 +169,10 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                 }
             } catch (e: Exception) {
                 Logger.e(e)
-                _state.update {
-                    it.copy(loading = false, targets = emptyList(), error = "加载设备失败：${e.message}")
+                if (!silent) {
+                    _state.update {
+                        it.copy(loading = false, targets = emptyList(), error = "加载设备失败：${friendlyError(e)}")
+                    }
                 }
             }
         }
@@ -185,7 +203,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                 }
             } catch (e: Exception) {
                 Logger.e(e)
-                _state.update { it.copy(loading = false, error = "申请失败：${e.message}") }
+                _state.update { it.copy(loading = false, error = "申请失败：${friendlyError(e)}") }
             }
         }
     }
@@ -197,6 +215,22 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
      * 没有这层兜底时，App 连续开着超过 30 分钟再进远控页就会一直报「加载设备失败」，
      * 用户只能去账号页刷新或重启 App 才能恢复。
      */
+    /**
+     * 把 Relay 的错误码翻成用户看得懂的中文。
+     *
+     * 2026-09-18：此前直接拼 e.message，界面上会出现
+     * 「加载设备失败：device is not enrolled in this account」这类英文原文。
+     */
+    private fun friendlyError(e: Exception): String {
+        if (e is AccountApiException) {
+            return when (e.code) {
+                "403007" -> "本机已被移出该账号，请到「账号」页重新登录后再试"
+                else -> ErrorCodes.getMessage(e.code)
+            }
+        }
+        return e.message ?: "未知错误"
+    }
+
     private suspend fun <T> withFreshAccessToken(block: suspend (String) -> T): T {
         val access = prefs.accountAccessToken.first()
         return try {
