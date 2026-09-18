@@ -103,6 +103,22 @@ impl StorageManager {
         }
         let mut conn = open_connection(&db_path)?;
         migrate(&mut conn, &db_path, had_existing_data)?;
+        // 自愈：应用刚启动，不可能有真正在跑的 Turn。
+        // 上次异常退出（崩溃 / 被强杀）会把 Turn 留在 running，
+        // 而 turns 上有"同一会话只允许一个 running"的唯一索引 ——
+        // 不清理的话，那个会话将永久无法再发送消息。
+        let recovered = conn
+            .execute(
+                "UPDATE turns SET status = 'interrupted', error_code = 'STALE_TURN',
+                        error_message = '上一次运行未正常结束，已自动结束',
+                        completed_at = ?1, updated_at = ?1
+                 WHERE status = 'running'",
+                params![chrono::Utc::now().timestamp_millis()],
+            )
+            .map_err(db_error)?;
+        if recovered > 0 {
+            diag_log(&format!("启动自愈：{recovered} 个残留 running Turn 已标记为 interrupted"));
+        }
         Ok(Self { db_path, auth_path })
     }
 
@@ -275,6 +291,16 @@ impl StorageManager {
             }
 
             let now = chrono::Utc::now().timestamp_millis();
+            // 自愈：上一轮若卡在 running 超过 10 分钟（前端崩溃后没人收尾），
+            // 标记为 interrupted，避免这个会话被永久锁死。
+            tx.execute(
+                "UPDATE turns SET status = 'interrupted', error_code = 'STALE_TURN',
+                        error_message = '上一次运行超时未结束，已自动结束',
+                        completed_at = ?1, updated_at = ?1
+                 WHERE session_id = ?2 AND status = 'running' AND updated_at < ?3",
+                params![now, session_id, now - 10 * 60 * 1000],
+            )
+            .map_err(db_error)?;
             let turn_id = uuid::Uuid::new_v4().to_string();
             tx.execute(
                 "INSERT INTO turns (id, session_id, status, created_at, started_at, updated_at)
